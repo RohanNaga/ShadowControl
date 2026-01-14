@@ -1,0 +1,12 @@
+# Shadow Control Dependencies
+
+# K-Scale Robot OS
+kos_zbot>=0.1.0
+
+# Core
+numpy>=1.21.0
+pyyaml>=6.0
+
+# Development/Testing (not needed on Milk-V)
+opencv-python>=4.5.0
+ultralytics>=8.0.0  # For model export only

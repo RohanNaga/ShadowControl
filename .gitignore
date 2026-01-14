@@ -1,0 +1,61 @@
+# Claude Code
+.claude/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Models (large binary files)
+models/*.cvimodel
+models/*.onnx
+models/*.pt
+models/*.pth
+
+# Logs
+*.log
+logs/
+
+# Test outputs
+/tmp/
+*.raw
+test_frame.*
+
+# Build artifacts
+*.o
+*.out
+shadow_control
