@@ -7,6 +7,16 @@ kos_zbot>=0.1.0
 numpy>=1.21.0
 pyyaml>=6.0
 
-# Development/Testing (not needed on Milk-V)
+# Computer Vision
 opencv-python>=4.5.0
+mediapipe>=0.10.0
+
+# ROS2 (installed via apt, listed here for reference)
+# - ros-humble-rclpy
+# - ros-humble-std-msgs
+# - ros-humble-sensor-msgs
+# - ros-humble-geometry-msgs
+# - ros-humble-cv-bridge
+
+# Development/Testing
 ultralytics>=8.0.0  # For model export only
