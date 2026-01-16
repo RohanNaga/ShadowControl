@@ -40,11 +40,13 @@ env/
 .DS_Store
 Thumbs.db
 
-# Models (large binary files)
+# Models (large binary files - downloaded at runtime)
 models/*.cvimodel
 models/*.onnx
 models/*.pt
 models/*.pth
+models/*.task
+models/*.tflite
 
 # Logs
 *.log

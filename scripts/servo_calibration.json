@@ -1,0 +1,26 @@
+{
+  "5": {
+    "zero_offset": 38671,
+    "name": "R_Shoulder"
+  },
+  "6": {
+    "zero_offset": 27392,
+    "name": "R_Elbow"
+  },
+  "7": {
+    "zero_offset": 38400,
+    "name": "R_Wrist"
+  },
+  "8": {
+    "zero_offset": 21261,
+    "name": "L_Shoulder"
+  },
+  "9": {
+    "zero_offset": 32012,
+    "name": "L_Elbow"
+  },
+  "10": {
+    "zero_offset": 53761,
+    "name": "L_Wrist"
+  }
+}

@@ -1,19 +1,49 @@
+#!/usr/bin/env python3
+"""
+Pose estimation demo using MediaPipe Tasks API.
+
+Displays webcam feed with pose skeleton and joint angles overlay.
+"""
+
+import os
+import urllib.request
+
 import cv2
 import mediapipe as mp
+from mediapipe.tasks import python as mp_tasks
+from mediapipe.tasks.python import vision
 import numpy as np
-import math
 
-mp_pose = mp.solutions.pose
-mp_draw = mp.solutions.drawing_utils
-mp_styles = mp.solutions.drawing_styles
+# Model file path and URL
+MODEL_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "models")
+MODEL_FILE = os.path.join(MODEL_DIR, "pose_landmarker_lite.task")
+MODEL_URL = "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task"
 
-pose = mp_pose.Pose(
-    static_image_mode=False,
-    model_complexity=1,
-    enable_segmentation=False,
-    min_detection_confidence=0.5,
-    min_tracking_confidence=0.5,
-)
+# Full pose connections (matches old mp_pose.POSE_CONNECTIONS)
+POSE_CONNECTIONS = [
+    (0, 1), (1, 2), (2, 3), (3, 7),  # Right face
+    (0, 4), (4, 5), (5, 6), (6, 8),  # Left face
+    (9, 10),  # Mouth
+    (11, 12),  # Shoulders
+    (11, 13), (13, 15), (15, 17), (15, 19), (15, 21), (17, 19),  # Left arm
+    (12, 14), (14, 16), (16, 18), (16, 20), (16, 22), (18, 20),  # Right arm
+    (11, 23), (12, 24), (23, 24),  # Torso
+    (23, 25), (25, 27), (27, 29), (27, 31), (29, 31),  # Left leg
+    (24, 26), (26, 28), (28, 30), (28, 32), (30, 32),  # Right leg
+]
+
+
+def download_model():
+    """Download pose landmarker model if not present."""
+    if os.path.exists(MODEL_FILE):
+        return MODEL_FILE
+
+    print(f"Downloading pose landmarker model...")
+    os.makedirs(MODEL_DIR, exist_ok=True)
+    urllib.request.urlretrieve(MODEL_URL, MODEL_FILE)
+    print(f"Model saved to {MODEL_FILE}")
+    return MODEL_FILE
+
 
 def angle_between(v1, v2):
     n1 = np.linalg.norm(v1)
@@ -25,8 +55,10 @@ def angle_between(v1, v2):
     dot = np.clip(np.dot(v1, v2), -1.0, 1.0)
     return float(np.degrees(np.arccos(dot)))
 
+
 def elbow_flexion(shoulder, elbow, wrist):
     return angle_between(shoulder - elbow, wrist - elbow)
+
 
 def shoulder_abduction(hip, shoulder, elbow):
     torso = shoulder - hip
@@ -37,6 +69,7 @@ def shoulder_abduction(hip, shoulder, elbow):
     arm[2] = 0
     return angle_between(torso, arm)
 
+
 def shoulder_extension(hip, shoulder, elbow):
     torso = shoulder - hip
     arm = elbow - shoulder
@@ -46,11 +79,13 @@ def shoulder_extension(hip, shoulder, elbow):
     arm[0] = 0
     return angle_between(torso, arm)
 
+
 def to_px(lm, idx, w, h):
     """MediaPipe landmark -> pixel coords."""
     x = int(lm[idx].x * w)
     y = int(lm[idx].y * h)
     return x, y
+
 
 def put_text_with_bg(img, text, org, font_scale=0.55, thickness=1, pad=4):
     """Readable text overlay (black bg, white text)."""
@@ -61,77 +96,119 @@ def put_text_with_bg(img, text, org, font_scale=0.55, thickness=1, pad=4):
     cv2.rectangle(img, (x - pad, y - th - pad), (x + tw + pad, y + baseline + pad), (0, 0, 0), -1)
     cv2.putText(img, text, (x, y), font, font_scale, (255, 255, 255), thickness, cv2.LINE_AA)
 
-cap = cv2.VideoCapture(1)
 
-while cap.isOpened():
-    ret, frame = cap.read()
-    if not ret:
-        break
-
+def draw_landmarks(frame, lm):
+    """Draw pose landmarks and connections (mimics old mp_draw style)."""
     h, w = frame.shape[:2]
 
-    image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    results = pose.process(image_rgb)
+    # Draw connections first (green lines)
+    for start_idx, end_idx in POSE_CONNECTIONS:
+        if start_idx < len(lm) and end_idx < len(lm):
+            start = lm[start_idx]
+            end = lm[end_idx]
+            if start.visibility > 0.5 and end.visibility > 0.5:
+                start_point = (int(start.x * w), int(start.y * h))
+                end_point = (int(end.x * w), int(end.y * h))
+                cv2.line(frame, start_point, end_point, (0, 255, 0), 2)
 
-    if results.pose_landmarks:
-        lm = results.pose_landmarks.landmark
+    # Draw landmarks (red circles with white border)
+    for i, landmark in enumerate(lm):
+        if landmark.visibility > 0.5:
+            x, y = int(landmark.x * w), int(landmark.y * h)
+            cv2.circle(frame, (x, y), 5, (255, 255, 255), -1)
+            cv2.circle(frame, (x, y), 4, (0, 0, 255), -1)
 
-        # Draw skeleton
-        mp_draw.draw_landmarks(
-            frame,
-            results.pose_landmarks,
-            mp_pose.POSE_CONNECTIONS,
-            landmark_drawing_spec=mp_styles.get_default_pose_landmarks_style(),
-        )
 
-        def p(i):
-            return np.array([lm[i].x, lm[i].y, lm[i].z], dtype=np.float32)
+def main():
+    # Download model if needed
+    model_path = download_model()
 
-        # 3D-ish normalized coords (mediapipe)
-        L_SH, L_EL, L_WR, L_HIP = p(11), p(13), p(15), p(23)
-        R_SH, R_EL, R_WR, R_HIP = p(12), p(14), p(16), p(24)
+    # Initialize pose detector (new Tasks API)
+    base_options = mp_tasks.BaseOptions(model_asset_path=model_path)
+    options = vision.PoseLandmarkerOptions(
+        base_options=base_options,
+        running_mode=vision.RunningMode.VIDEO,
+        num_poses=1,
+        min_pose_detection_confidence=0.5,
+        min_tracking_confidence=0.5,
+    )
+    pose = vision.PoseLandmarker.create_from_options(options)
 
-        left_elbow = elbow_flexion(L_SH, L_EL, L_WR)
-        right_elbow = elbow_flexion(R_SH, R_EL, R_WR)
+    cap = cv2.VideoCapture(1)
+    frame_timestamp_ms = 0
 
-        left_abd = shoulder_abduction(L_HIP, L_SH, L_EL)
-        right_abd = shoulder_abduction(R_HIP, R_SH, R_EL)
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret:
+            break
 
-        left_ext = shoulder_extension(L_HIP, L_SH, L_EL)
-        right_ext = shoulder_extension(R_HIP, R_SH, R_EL)
+        h, w = frame.shape[:2]
 
-        # --- HUD (top-left) ---
-        hud_lines = [
-            "Angles (deg)",
-            f"L Shoulder Abd: {left_abd:5.1f}   R: {right_abd:5.1f}",
-            f"L Shoulder Ext: {left_ext:5.1f}   R: {right_ext:5.1f}",
-            f"L Elbow Flex:   {left_elbow:5.1f}   R: {right_elbow:5.1f}",
-            "ESC to quit",
-        ]
+        # Process pose
+        image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=image_rgb)
+        frame_timestamp_ms += 33  # ~30fps
+        results = pose.detect_for_video(mp_image, frame_timestamp_ms)
 
-        x0, y0 = 12, 24
-        for i, line in enumerate(hud_lines):
-            put_text_with_bg(frame, line, (x0, y0 + i * 22), font_scale=0.55, thickness=1)
+        if results.pose_landmarks and len(results.pose_landmarks) > 0:
+            lm = results.pose_landmarks[0]
 
-        # --- Per-joint labels near shoulder/elbow (optional but useful) ---
-        # Left shoulder + elbow
-        l_sh_px = to_px(lm, 11, w, h)
-        l_el_px = to_px(lm, 13, w, h)
-        put_text_with_bg(frame, f"L Abd {left_abd:4.0f}", (l_sh_px[0] + 10, l_sh_px[1] - 10), font_scale=0.5)
-        put_text_with_bg(frame, f"L Ext {left_ext:4.0f}", (l_sh_px[0] + 10, l_sh_px[1] + 12), font_scale=0.5)
-        put_text_with_bg(frame, f"L Flex {left_elbow:4.0f}", (l_el_px[0] + 10, l_el_px[1] - 10), font_scale=0.5)
+            # Draw skeleton
+            draw_landmarks(frame, lm)
 
-        # Right shoulder + elbow
-        r_sh_px = to_px(lm, 12, w, h)
-        r_el_px = to_px(lm, 14, w, h)
-        put_text_with_bg(frame, f"R Abd {right_abd:4.0f}", (r_sh_px[0] + 10, r_sh_px[1] - 10), font_scale=0.5)
-        put_text_with_bg(frame, f"R Ext {right_ext:4.0f}", (r_sh_px[0] + 10, r_sh_px[1] + 12), font_scale=0.5)
-        put_text_with_bg(frame, f"R Flex {right_elbow:4.0f}", (r_el_px[0] + 10, r_el_px[1] - 10), font_scale=0.5)
+            def p(i):
+                return np.array([lm[i].x, lm[i].y, lm[i].z], dtype=np.float32)
 
-    cv2.imshow("Pose Estimation", frame)
+            # 3D-ish normalized coords (mediapipe)
+            L_SH, L_EL, L_WR, L_HIP = p(11), p(13), p(15), p(23)
+            R_SH, R_EL, R_WR, R_HIP = p(12), p(14), p(16), p(24)
 
-    if cv2.waitKey(1) & 0xFF == 27:
-        break
+            left_elbow = elbow_flexion(L_SH, L_EL, L_WR)
+            right_elbow = elbow_flexion(R_SH, R_EL, R_WR)
 
-cap.release()
-cv2.destroyAllWindows()
+            left_abd = shoulder_abduction(L_HIP, L_SH, L_EL)
+            right_abd = shoulder_abduction(R_HIP, R_SH, R_EL)
+
+            left_ext = shoulder_extension(L_HIP, L_SH, L_EL)
+            right_ext = shoulder_extension(R_HIP, R_SH, R_EL)
+
+            # --- HUD (top-left) ---
+            hud_lines = [
+                "Angles (deg)",
+                f"L Shoulder Abd: {left_abd:5.1f}   R: {right_abd:5.1f}",
+                f"L Shoulder Ext: {left_ext:5.1f}   R: {right_ext:5.1f}",
+                f"L Elbow Flex:   {left_elbow:5.1f}   R: {right_elbow:5.1f}",
+                "ESC to quit",
+            ]
+
+            x0, y0 = 12, 24
+            for i, line in enumerate(hud_lines):
+                put_text_with_bg(frame, line, (x0, y0 + i * 22), font_scale=0.55, thickness=1)
+
+            # --- Per-joint labels near shoulder/elbow (optional but useful) ---
+            # Left shoulder + elbow
+            l_sh_px = to_px(lm, 11, w, h)
+            l_el_px = to_px(lm, 13, w, h)
+            put_text_with_bg(frame, f"L Abd {left_abd:4.0f}", (l_sh_px[0] + 10, l_sh_px[1] - 10), font_scale=0.5)
+            put_text_with_bg(frame, f"L Ext {left_ext:4.0f}", (l_sh_px[0] + 10, l_sh_px[1] + 12), font_scale=0.5)
+            put_text_with_bg(frame, f"L Flex {left_elbow:4.0f}", (l_el_px[0] + 10, l_el_px[1] - 10), font_scale=0.5)
+
+            # Right shoulder + elbow
+            r_sh_px = to_px(lm, 12, w, h)
+            r_el_px = to_px(lm, 14, w, h)
+            put_text_with_bg(frame, f"R Abd {right_abd:4.0f}", (r_sh_px[0] + 10, r_sh_px[1] - 10), font_scale=0.5)
+            put_text_with_bg(frame, f"R Ext {right_ext:4.0f}", (r_sh_px[0] + 10, r_sh_px[1] + 12), font_scale=0.5)
+            put_text_with_bg(frame, f"R Flex {right_elbow:4.0f}", (r_el_px[0] + 10, r_el_px[1] - 10), font_scale=0.5)
+
+        cv2.imshow("Pose Estimation", frame)
+
+        if cv2.waitKey(1) & 0xFF == 27:
+            break
+
+    cap.release()
+    cv2.destroyAllWindows()
+    pose.close()
+
+
+if __name__ == "__main__":
+    main()

@@ -481,7 +481,7 @@ Configure each servo with a unique ID using `scripts/configure_servo.py`.
 |-------|----------|------------|-------|
 | Left Shoulder | 8 | ✓ | |
 | Left Elbow | 9 | ✓ | |
-| Left Wrist | 10 | | |
+| Left Wrist | 10 | ✓ | |
 
 ### Right Leg (IDs 11-15)
 
