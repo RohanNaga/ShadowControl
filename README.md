@@ -66,6 +66,7 @@ ShadowControl/
 | File | Purpose |
 |------|---------|
 | `config/robot.yaml` | Servo ID mappings, joint limits, keypoint pairs |
+| `scripts/configure_baudrate.py` | Reconfigure servo baudrate from 1Mbps to 500kbps |
 | `scripts/test_servos.py` | Tests servo communication (kos_zbot or feetech SDK) |
 | `scripts/test_vision.py` | Tests camera and pose detection pipeline |
 | `src/vision/` | TDL SDK pose detection integration (C) |
@@ -195,6 +196,78 @@ GND (pin 6)   ───────►  GND
 - Position **A**: UART mode (for Milk-V) ← USE THIS
 - Position **B**: USB mode (for PC debugging)
 
+### Dual Waveshare Setup (Recommended - No Splicing)
+
+Using 2 Waveshare adapters with 2 separate UARTs. No soldering or wire splicing required.
+
+**Pin Summary:**
+
+| Waveshare | Function | Pin | Device | Servos |
+|-----------|----------|-----|--------|--------|
+| #1 (Arms) | TX | Pin 8 | `/dev/ttyS0` | ID 1-8 |
+| #1 (Arms) | RX | Pin 10 | | |
+| #1 (Arms) | GND | **Pin 6** | | |
+| #2 (Legs) | TX | Pin 11 | `/dev/ttyS2` | ID 9-16 |
+| #2 (Legs) | RX | Pin 13 | | |
+| #2 (Legs) | GND | **Pin 14** | | |
+
+**Available GND pins on J3 header:** 6, 9, 14, 20, 25
+
+```
+                    MILK-V DUO S (J3 Header - 40 pins)
+    ┌───────────────────────────────────────────────────────────────┐
+    │                                                               │
+    │   UART0 (default)              UART2 (pinmux enabled)        │
+    │   ══════════════               ══════════════════════        │
+    │   Pin 8  (TX) ────┐            Pin 11 (TX) ────┐             │
+    │   Pin 10 (RX) ──┐ │            Pin 13 (RX) ──┐ │             │
+    │   Pin 6  (GND)─┐│ │            Pin 14 (GND)─┐│ │             │
+    │                │││ │                        │││ │             │
+    └────────────────┼┼┼─┼────────────────────────┼┼┼─┼─────────────┘
+                     │││ │                        │││ │
+                     ▼▼▼ ▼                        ▼▼▼ ▼
+              ┌─────────────────┐          ┌─────────────────┐
+              │ WAVESHARE #1    │          │ WAVESHARE #2    │
+              │ (Jumper A)      │          │ (Jumper A)      │
+              │                 │          │                 │
+              │ GND ◄── Pin 6   │          │ GND ◄── Pin 14  │
+              │ RX  ◄── Pin 10  │          │ RX  ◄── Pin 13  │
+              │ TX  ◄── Pin 8   │          │ TX  ◄── Pin 11  │
+              │                 │          │                 │
+              │ DC: 7.4-12V     │          │ DC: 7.4-12V     │
+              └────────┬────────┘          └────────┬────────┘
+                       │                            │
+            ┌──────────┴──────────┐      ┌──────────┴──────────┐
+            │   DVG1      DVG2    │      │   DVG1      DVG2    │
+            └─────┬─────────┬─────┘      └─────┬─────────┬─────┘
+                  │         │                  │         │
+                  ▼         ▼                  ▼         ▼
+              ┌───────┐ ┌───────┐          ┌───────┐ ┌───────┐
+              │ R.ARM │ │ L.ARM │          │ R.LEG │ │ L.LEG │
+              │ ID 1-4│ │ ID 5-8│          │ID 9-12│ │ID13-16│
+              └───────┘ └───────┘          └───────┘ └───────┘
+```
+
+### UART2 Pinmux Configuration (Required)
+
+UART2 is not enabled by default. The pinmux must be configured at boot.
+
+**Automatic (persistent):** Create `/mnt/data/auto.sh` on the Milk-V:
+```bash
+#!/bin/sh
+# Enable UART2 on pins 11 (TX) and 13 (RX)
+duo-pinmux -w B11/UART2_TX
+duo-pinmux -w B12/UART2_RX
+```
+
+**Manual (temporary):**
+```bash
+duo-pinmux -w B11/UART2_TX
+duo-pinmux -w B12/UART2_RX
+```
+
+**What is pinmux?** Pin multiplexing allows each physical pin to serve different functions (GPIO, UART, I2C, etc.). The `duo-pinmux` tool configures which internal peripheral connects to which physical pin.
+
 ### Camera Connection
 
 - Connect CAM-GC2083 to **J1 connector** (16-pin, 0.5mm pitch)
@@ -273,13 +346,34 @@ STEP 5: ROBOT MOTION
 
 ### 1. Servo Baudrate Configuration (One-Time - REQUIRED)
 
-Before first use, reconfigure all servos from 1Mbps to 500kbps:
+Before first use, reconfigure all servos from 1Mbps to 500kbps.
 
-1. Connect servo to PC via USB with FE-URT-1 board
-2. Open Feetech FD software
-3. Set baudrate to 500000 (register value 1)
-4. Click "Save"
-5. Repeat for all 16 servos
+**Good news**: Use the Waveshare adapter itself (no separate FE-URT-1 board needed)!
+
+#### Option A: Using Python Script (Recommended)
+
+```bash
+# On your PC with Waveshare adapter connected via USB
+pip install feetech-servo-sdk
+
+# Interactive mode - configure one servo at a time
+python scripts/configure_baudrate.py --port /dev/ttyUSB0 --id 1-16 --interactive
+
+# Or scan for servos to see current baudrates
+python scripts/configure_baudrate.py --scan
+```
+
+#### Option B: Manual via Feetech FD Software (Windows)
+
+1. Set Waveshare adapter jumper to position **B** (USB mode)
+2. Connect adapter to PC via USB
+3. Connect ONE servo at a time to DVG port
+4. Open Feetech FD software
+5. Set baudrate to 500000 (register value 1)
+6. Click "Save"
+7. Repeat for all 24 servos
+
+**Note**: Factory-default servos all have ID=1, so configure one at a time
 
 ### 2. Hardware Assembly
 
@@ -332,11 +426,33 @@ model_deploy.py --mlir yolov8n_pose.mlir \
 scp yolov8n_pose.cvimodel root@milkv:/path/to/ShadowControl/models/
 ```
 
-### 5. Running Shadow Control
+### 5. Initial Testing (Stock Linux Image)
+
+If you have stock Milk-V Linux (before flashing K-Scale image), you can still test hardware:
+
+```bash
+# SSH into Milk-V
+ssh root@milkv-duos
+
+# Step 1: Check UART device exists
+ls -la /dev/ttyAMA*
+# Should show /dev/ttyAMA5 (default UART on GPIO header)
+
+# Step 2: Check pinmux configuration
+cat /sys/kernel/debug/pinctrl/pinctrl-maps | grep -i uart
+# OR
+duo-pinmux -p GP4  # Pin 8 - should show UART function
+duo-pinmux -p GP5  # Pin 10 - should show UART function
+
+# Step 3: Simple serial test (no servos yet)
+stty -F /dev/ttyAMA5 500000 raw -echo
+```
+
+### 6. Running Shadow Control (Full Setup)
 
 ```bash
 # Test servos first
-python scripts/test_servos.py
+python scripts/test_servos.py --device /dev/ttyAMA5 --baudrate 500000 --ids 1-16
 
 # Test camera and pose detection
 python scripts/test_vision.py
@@ -347,26 +463,81 @@ python scripts/test_vision.py
 
 ---
 
-## Servo Mapping
+## Servo ID Assignment
+
+Configure each servo with a unique ID using `scripts/configure_servo.py`.
+
+### Right Arm (IDs 5-7)
+
+| Joint | Servo ID | Configured | Notes |
+|-------|----------|------------|-------|
+| Right Shoulder | 5 | ✓ | |
+| Right Elbow | 6 | ✓ | |
+| Right Wrist | 7 | ✓ | |
+
+### Left Arm (IDs 8-10)
+
+| Joint | Servo ID | Configured | Notes |
+|-------|----------|------------|-------|
+| Left Shoulder | 8 | ✓ | |
+| Left Elbow | 9 | ✓ | |
+| Left Wrist | 10 | | |
+
+### Right Leg (IDs 11-15)
+
+| Joint | Servo ID | Configured | Notes |
+|-------|----------|------------|-------|
+| Right Hip | 11 | | |
+| Right Thigh | 12 | | |
+| Right Knee | 13 | | |
+| Right Shin | 14 | | |
+| Right Ankle | 15 | | |
+
+### Left Leg (IDs 16-20)
+
+| Joint | Servo ID | Configured | Notes |
+|-------|----------|------------|-------|
+| Left Hip | 16 | | |
+| Left Thigh | 17 | | |
+| Left Knee | 18 | | |
+| Left Shin | 19 | | |
+| Left Ankle | 20 | | |
+
+### Configuration Commands
+
+```bash
+# Configure a factory servo (1Mbps) to a specific ID at 500kbps
+python3 scripts/configure_servo.py --new-id <ID> --factory
+
+# Test a configured servo
+python3 scripts/configure_servo.py --test <ID>
+
+# Scan for all servos
+python3 scripts/configure_servo.py --scan
+```
+
+---
+
+## Servo Mapping (Keypoints)
 
 | Servo ID | Joint | Keypoint Pair | Notes |
 |----------|-------|---------------|-------|
-| 1 | Right Shoulder Pitch | 6→8 | right_shoulder to right_elbow |
-| 2 | Right Shoulder Roll | 6→8 | |
-| 3 | Right Elbow | 6→8→10 | shoulder-elbow-wrist angle |
-| 4 | Right Wrist | 8→10 | |
-| 5 | Left Shoulder Pitch | 5→7 | left_shoulder to left_elbow |
-| 6 | Left Shoulder Roll | 5→7 | |
-| 7 | Left Elbow | 5→7→9 | shoulder-elbow-wrist angle |
-| 8 | Left Wrist | 7→9 | |
-| 9 | Right Hip Pitch | 12→14 | right_hip to right_knee |
-| 10 | Right Hip Roll | 12→14 | |
-| 11 | Right Knee | 12→14→16 | hip-knee-ankle angle |
-| 12 | Right Ankle | 14→16 | |
-| 13 | Left Hip Pitch | 11→13 | left_hip to left_knee |
-| 14 | Left Hip Roll | 11→13 | |
-| 15 | Left Knee | 11→13→15 | hip-knee-ankle angle |
-| 16 | Left Ankle | 13→15 | |
+| 5 | Right Shoulder | 6→8 | right_shoulder to right_elbow |
+| 6 | Right Elbow | 6→8→10 | shoulder-elbow-wrist angle |
+| 7 | Right Wrist | 8→10 | |
+| 8 | Left Shoulder | 5→7 | left_shoulder to left_elbow |
+| 9 | Left Elbow | 5→7→9 | shoulder-elbow-wrist angle |
+| 10 | Left Wrist | 7→9 | |
+| 11 | Right Hip | 12→14 | right_hip to right_knee |
+| 12 | Right Thigh | 12→14 | |
+| 13 | Right Knee | 12→14→16 | hip-knee-ankle angle |
+| 14 | Right Shin | 14→16 | |
+| 15 | Right Ankle | 14→16 | |
+| 16 | Left Hip | 11→13 | left_hip to left_knee |
+| 17 | Left Thigh | 11→13 | |
+| 18 | Left Knee | 11→13→15 | hip-knee-ankle angle |
+| 19 | Left Shin | 13→15 | |
+| 20 | Left Ankle | 13→15 | |
 
 ---
 
@@ -459,11 +630,22 @@ ultralytics>=8.0.0    # Dev only - model export
 
 ### Servos Not Responding
 
-1. Check baudrate configuration (must be 500kbps, not factory 1Mbps)
-2. Verify wiring (TX-TX, RX-RX, not crossed!)
-3. Check servo IDs match config
-4. Ensure adapter jumper is in position A (UART mode)
-5. Verify power supply connected to adapter (9-12.6V DC)
+| Problem | Likely Cause | Solution |
+|---------|--------------|----------|
+| No servos found | Baudrate mismatch | Reconfig servos to 500kbps with `configure_baudrate.py` |
+| No servos found | Wrong wiring | Check TX-TX, RX-RX (NOT crossed!) |
+| No servos found | No power | Check DC input to adapter (7.4-12V) |
+| No servos found | Wrong jumper | Ensure jumper is at position **A** (UART mode) |
+| Some servos missing | Duplicate IDs | Check each servo has unique ID |
+| Some servos missing | Broken chain | Check daisy chain connections |
+| Permission denied | UART access | Run as root or add user to dialout |
+| /dev/ttyAMA5 missing | Pinmux not set | Flash full K-Scale image |
+
+**Quick diagnosis:**
+```bash
+# Scan for servos at different baudrates
+python scripts/configure_baudrate.py --scan
+```
 
 ### Camera Not Working
 
