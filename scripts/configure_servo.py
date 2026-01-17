@@ -72,7 +72,7 @@ def find_servo(port, packet, factory_only=False):
 
     for baud in baudrates:
         port.setBaudRate(baud)
-        for sid in list(range(1, 10)) + [254]:
+        for sid in range(1, 51):
             model, result, _ = packet.ping(port, sid)
             if result == 0:
                 actual_id = sid if sid != 254 else 1
@@ -90,7 +90,7 @@ def scan_all(port, packet):
     for baud in [1000000, 500000]:
         port.setBaudRate(baud)
         print(f"\n{baud} bps:")
-        for sid in range(1, 20):
+        for sid in range(1, 51):
             model, result, _ = packet.ping(port, sid)
             if result == 0:
                 print(f"  ID {sid}: model {model}")

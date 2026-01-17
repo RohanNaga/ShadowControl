@@ -12,12 +12,25 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from servo_control import create_controller, auto_detect_port, load_calibration, angle_to_steps
 
 SERVO_NAMES = {
-    5: "R_Shoulder",
-    6: "R_Elbow",
-    7: "R_Wrist",
-    8: "L_Shoulder",
-    9: "L_Elbow",
-    10: "L_Wrist",
+    # Arms (Shoulder1=extension, Shoulder2=abduction, Elbow=bend)
+    5: "R_Shoulder1",
+    6: "R_Shoulder2",
+    7: "R_Elbow",
+    8: "L_Shoulder1",
+    9: "L_Shoulder2",
+    10: "L_Elbow",
+    # Right Leg
+    13: "R_Hip",
+    14: "R_Thigh",
+    15: "R_Knee",
+    16: "R_Shin",
+    17: "R_Ankle",
+    # Left Leg
+    18: "L_Hip",
+    19: "L_Thigh",
+    20: "L_Knee",
+    21: "L_Shin",
+    22: "L_Ankle",
 }
 
 def main():
