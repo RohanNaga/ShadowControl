@@ -49,14 +49,17 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 #   L Elbow Flexion      -> Servo 10 (Left Wrist)
 
 SERVO_MAPPING = {
-    # Offsets are calibrated from first frame automatically
+    # Offsets are calibrated from first frame automatically (initial angles become 0)
     # Scale: positive = same direction, negative = inverted
-    5: {"name": "R_Shoulder", "pose_key": "right_ext", "scale": 1.0, "min": -90, "max": 90},
-    6: {"name": "R_Elbow", "pose_key": "right_abd", "scale": 1.0, "min": -90, "max": 90},
-    7: {"name": "R_Wrist", "pose_key": "right_elbow", "scale": 1.0, "min": -90, "max": 90},
-    8: {"name": "L_Shoulder", "pose_key": "left_ext", "scale": 1.0, "min": -90, "max": 90},
-    9: {"name": "L_Elbow", "pose_key": "left_abd", "scale": 1.0, "min": -90, "max": 90},
-    10: {"name": "L_Wrist", "pose_key": "left_elbow", "scale": 1.0, "min": -90, "max": 90},
+    # Extension: 0° to 180° range (at side to forward/up)
+    # Abduction: 0° to 180° range (down at side to straight up)
+    # Elbow flexion: 0° to 180° range (straight to fully bent)
+    5: {"name": "R_Shoulder", "pose_key": "right_ext", "scale": 1.0, "min": 0, "max": 180},
+    6: {"name": "R_Elbow", "pose_key": "right_abd", "scale": 1.0, "min": 0, "max": 180},
+    7: {"name": "R_Wrist", "pose_key": "right_elbow", "scale": 1.0, "min": 0, "max": 180},
+    8: {"name": "L_Shoulder", "pose_key": "left_ext", "scale": 1.0, "min": 0, "max": 180},
+    9: {"name": "L_Elbow", "pose_key": "left_abd", "scale": 1.0, "min": 0, "max": 180},
+    10: {"name": "L_Wrist", "pose_key": "left_elbow", "scale": 1.0, "min": 0, "max": 180},
 }
 
 CALIBRATION_FILE = os.path.join(
@@ -123,26 +126,154 @@ def elbow_flexion(shoulder, elbow, wrist):
     return angle_between(shoulder - elbow, wrist - elbow)
 
 
+def shoulder_roll(shoulder, elbow, wrist):
+    """
+    Calculate shoulder roll (external rotation around upper arm axis).
+    Returns angle in range 0° to 180°:
+    - 0° = forearm pointing down (internal rotation)
+    - 90° = forearm horizontal (neutral rotation)
+    - 180° = forearm pointing up (external rotation)
+    
+    Coordinate System:
+    - Measures rotation of forearm around the upper arm axis (shoulder->elbow)
+    - Based on "External Rotation" diagram where 0° = down, 180° = up
+    - Calculates the angle between the forearm and a reference direction (down)
+      projected onto the plane perpendicular to the upper arm
+    """
+    upper_arm = elbow - shoulder  # Upper arm vector
+    forearm = wrist - elbow       # Forearm vector
+    
+    # Normalize vectors
+    upper_arm_norm = np.linalg.norm(upper_arm)
+    forearm_norm = np.linalg.norm(forearm)
+    if upper_arm_norm < 1e-6 or forearm_norm < 1e-6:
+        return float("nan")
+    
+    upper_arm_unit = upper_arm / upper_arm_norm
+    forearm_unit = forearm / forearm_norm
+    
+    # Reference direction: "down" in MediaPipe coordinates (positive Y)
+    down_ref = np.array([0.0, 1.0, 0.0])
+    
+    # Project both forearm and reference onto plane perpendicular to upper arm
+    # Remove component parallel to upper arm
+    forearm_perp = forearm_unit - np.dot(forearm_unit, upper_arm_unit) * upper_arm_unit
+    down_ref_perp = down_ref - np.dot(down_ref, upper_arm_unit) * upper_arm_unit
+    
+    # Normalize perpendicular components
+    forearm_perp_norm = np.linalg.norm(forearm_perp)
+    down_ref_perp_norm = np.linalg.norm(down_ref_perp)
+    
+    if forearm_perp_norm < 1e-6 or down_ref_perp_norm < 1e-6:
+        return float("nan")  # Invalid projection
+    
+    forearm_perp = forearm_perp / forearm_perp_norm
+    down_ref_perp = down_ref_perp / down_ref_perp_norm
+    
+    # Calculate angle between reference and forearm in perpendicular plane
+    dot = np.clip(np.dot(down_ref_perp, forearm_perp), -1.0, 1.0)
+    angle = np.degrees(np.arccos(dot))
+    
+    # Use cross product to determine rotation direction
+    cross = np.cross(down_ref_perp, forearm_perp)
+    cross_along_arm = np.dot(cross, upper_arm_unit)
+    
+    # Map to 0-180 range based on rotation direction
+    if cross_along_arm < 0:
+        angle = 360.0 - angle
+    
+    # Normalize to 0-180 range
+    if angle > 180.0:
+        angle = 360.0 - angle
+    
+    return min(180.0, max(0.0, angle))
+
+
 def shoulder_abduction(hip, shoulder, elbow):
-    """Calculate shoulder abduction (side-to-side in XY plane)."""
-    torso = shoulder - hip
+    """
+    Calculate shoulder abduction (horizontal plane movement, like "Horizontal Adduction" diagram).
+    Returns angle in range 0° to 180°:
+    - 0° = arm at side (aligned with torso vertically, no horizontal deviation)
+    - 90° = arm horizontal out to side (perpendicular to torso)
+    - 180° = arm across body (maximum horizontal adduction)
+    
+    Coordinate System (XY/horizontal plane):
+    - Measures angle from vertical reference (downward) to arm direction in horizontal plane
+    - Based on "Horizontal Adduction" diagram where 0° = arms at side, 90° = horizontal, 180° = across body
+    """
     arm = elbow - shoulder
-    torso = torso.copy()
     arm = arm.copy()
-    torso[2] = 0
+    
+    # Project to XY plane (horizontal plane, removes depth/z component)
     arm[2] = 0
-    return angle_between(torso, arm)
+    
+    # Check if arm vector is valid
+    arm_norm = np.linalg.norm(arm)
+    if arm_norm < 1e-6:
+        return float("nan")
+    
+    # Reference direction: downward in XY plane (positive Y direction in MediaPipe)
+    # In MediaPipe, Y increases downward, so [0, 1, 0] is "down"
+    down_ref = np.array([0.0, 1.0, 0.0])
+    
+    # Normalize arm vector in XY plane
+    arm_xy = arm / arm_norm
+    
+    # Calculate angle from vertical (down) to arm direction
+    # This gives us the abduction angle: 0° when arm is down, 90° when horizontal
+    dot = np.clip(np.dot(down_ref, arm_xy), -1.0, 1.0)
+    angle = np.degrees(np.arccos(dot))
+    
+    # angle_between returns 0-180°, which is what we want
+    # 0° = arm pointing down (at side)
+    # 90° = arm pointing sideways (horizontal)
+    # 180° = arm pointing up (across body)
+    return min(180.0, max(0.0, angle))
 
 
 def shoulder_extension(hip, shoulder, elbow):
-    """Calculate shoulder extension (front-to-back in YZ plane)."""
-    torso = shoulder - hip
-    arm = elbow - shoulder
-    torso = torso.copy()
+    """
+    Calculate shoulder extension (vertical elevation in sagittal/YZ plane).
+    Returns angle in range 0° to 180°:
+    - 0° = arm down at side (aligned with torso vertically)
+    - 90° = arm horizontal forward (perpendicular to torso)
+    - 180° = arm straight up overhead (opposite to torso direction)
+    
+    Coordinate System (YZ/sagittal plane):
+    - Measures angle from vertical reference (downward) to arm direction in sagittal plane
+    - Based on "Vertical Elevation" diagram:
+      * 0° = arm down (aligned with vertical)
+      * 90° = arm horizontal forward (perpendicular to vertical)
+      * 180° = arm up (opposite to vertical)
+    """
+    arm = elbow - shoulder   # Vector from shoulder to elbow
     arm = arm.copy()
-    torso[0] = 0
+    
+    # Project to YZ plane (sagittal plane, removes side/x component)
     arm[0] = 0
-    return angle_between(torso, arm)
+    
+    # Check if projected arm vector is valid
+    arm_norm = np.linalg.norm(arm)
+    if arm_norm < 1e-6:  # Arm is perpendicular to YZ plane (horizontal out to side)
+        return 0.0  # No vertical elevation component
+    
+    # Reference direction: downward in YZ plane (positive Y direction in MediaPipe)
+    # In MediaPipe, Y increases downward, so [0, 1, 0] is "down"
+    down_ref = np.array([0.0, 1.0, 0.0])
+    
+    # Normalize arm vector in YZ plane
+    arm_yz = arm / arm_norm
+    
+    # Calculate angle from vertical (down) to arm direction in YZ plane
+    # This gives us the extension angle: 0° when arm is down, 90° when horizontal forward, 180° when up
+    dot = np.clip(np.dot(down_ref, arm_yz), -1.0, 1.0)
+    angle = np.degrees(np.arccos(dot))
+    
+    # angle_between returns 0-180°, which is what we want
+    # 0° = arm pointing down (at side)
+    # 90° = arm pointing forward (horizontal)
+    # 180° = arm pointing up (overhead)
+    return min(180.0, max(0.0, angle))
 
 
 def get_pose_angles(landmarks):
@@ -153,9 +284,10 @@ def get_pose_angles(landmarks):
         landmarks: List of NormalizedLandmark from PoseLandmarker result
 
     Returns dict with keys:
-        left_abd, right_abd - shoulder abduction
-        left_ext, right_ext - shoulder extension
-        left_elbow, right_elbow - elbow flexion
+        left_abd, right_abd - shoulder abduction (0-180°)
+        left_ext, right_ext - shoulder extension (0-180°)
+        left_roll, right_roll - shoulder roll/external rotation (0-180°)
+        left_elbow, right_elbow - elbow flexion (0-180°)
     """
     def p(i):
         lm = landmarks[i]
@@ -172,7 +304,96 @@ def get_pose_angles(landmarks):
         "right_abd": shoulder_abduction(R_HIP, R_SH, R_EL),
         "left_ext": shoulder_extension(L_HIP, L_SH, L_EL),
         "right_ext": shoulder_extension(R_HIP, R_SH, R_EL),
+        "left_roll": shoulder_roll(L_SH, L_EL, L_WR),
+        "right_roll": shoulder_roll(R_SH, R_EL, R_WR),
     }
+
+
+def draw_angle_arc(frame, p1_px, p2_px, p3_px, angle_deg, color=(255, 0, 255), alpha=0.4, radius=None):
+    """
+    Draw an angle arc between three points (p2 is the vertex/joint).
+    
+    Args:
+        frame: OpenCV image frame
+        p1_px: (x, y) pixel coordinates of first point
+        p2_px: (x, y) pixel coordinates of joint/vertex (where angle is measured)
+        p3_px: (x, y) pixel coordinates of third point
+        angle_deg: Angle in degrees to display
+        color: BGR color tuple for the arc
+        alpha: Transparency of filled arc (0-1)
+        radius: Optional radius in pixels (auto-calculated if None)
+    
+    Returns:
+        frame with arc drawn
+    """
+    if np.isnan(angle_deg):
+        return frame
+    
+    x1, y1 = p1_px
+    x2, y2 = p2_px
+    x3, y3 = p3_px
+    
+    # Calculate vectors from joint (p2) to each point
+    a = np.array([x1 - x2, y1 - y2], dtype=float)
+    b = np.array([x3 - x2, y3 - y2], dtype=float)
+    
+    # Prevent division by zero
+    if np.linalg.norm(a) < 1e-6 or np.linalg.norm(b) < 1e-6:
+        return frame
+    
+    # Auto-calculate radius if not provided
+    if radius is None:
+        base_radius = int(min(max(np.linalg.norm(a) * 0.15, 15), 50))
+    else:
+        base_radius = radius
+    
+    # Normalize vectors
+    a_unit = a / np.linalg.norm(a)
+    b_unit = b / np.linalg.norm(b)
+    
+    # Generate arc points between the two vectors
+    num_points = 30
+    arc_points = []
+    for i in range(num_points + 1):
+        t = i / num_points
+        # Interpolate between unit vectors
+        vec = (1 - t) * a_unit + t * b_unit
+        if np.linalg.norm(vec) < 1e-6:
+            continue
+        vec = vec / np.linalg.norm(vec)
+        px = int(x2 + vec[0] * base_radius)
+        py = int(y2 + vec[1] * base_radius)
+        arc_points.append((px, py))
+    
+    if len(arc_points) < 2:
+        return frame
+    
+    # Draw filled arc (semi-transparent)
+    poly = [(x2, y2)] + arc_points + [(x2, y2)]
+    overlay = frame.copy()
+    cv2.fillPoly(overlay, [np.array(poly, dtype=np.int32)], color)
+    frame = cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0)
+    
+    # Draw arc outline
+    cv2.polylines(frame, [np.array(arc_points, dtype=np.int32)], False, color, 2)
+    
+    # Display angle value near the arc
+    text = f"{int(angle_deg)}°"
+    text_x = x2 - 30
+    text_y = y2 - base_radius - 10
+    
+    # Draw text with background for readability
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale = 0.6
+    thickness = 2
+    (text_width, text_height), baseline = cv2.getTextSize(text, font, font_scale, thickness)
+    cv2.rectangle(frame, 
+                  (text_x - 3, text_y - text_height - 3),
+                  (text_x + text_width + 3, text_y + baseline + 3),
+                  (0, 0, 0), -1)
+    cv2.putText(frame, text, (text_x, text_y), font, font_scale, color, thickness, cv2.LINE_AA)
+    
+    return frame
 
 
 def draw_landmarks(frame, landmarks):
@@ -184,14 +405,16 @@ def draw_landmarks(frame, landmarks):
         if start_idx < len(landmarks) and end_idx < len(landmarks):
             start = landmarks[start_idx]
             end = landmarks[end_idx]
-            start_point = (int(start.x * w), int(start.y * h))
-            end_point = (int(end.x * w), int(end.y * h))
-            cv2.line(frame, start_point, end_point, (0, 255, 0), 2)
+            if start.visibility > 0.5 and end.visibility > 0.5:
+                start_point = (int(start.x * w), int(start.y * h))
+                end_point = (int(end.x * w), int(end.y * h))
+                cv2.line(frame, start_point, end_point, (0, 255, 0), 2)
 
     # Draw landmarks
     for i, lm in enumerate(landmarks):
-        x, y = int(lm.x * w), int(lm.y * h)
-        cv2.circle(frame, (x, y), 5, (0, 0, 255), -1)
+        if lm.visibility > 0.5:
+            x, y = int(lm.x * w), int(lm.y * h)
+            cv2.circle(frame, (x, y), 5, (0, 0, 255), -1)
 
 
 # ============================================================================
@@ -266,6 +489,10 @@ class ServoController:
     def write_angle(self, servo_id, angle):
         """Write angle to servo (relative to calibrated zero)."""
         if not self.connected:
+            return False
+
+        # Don't actuate if angle is less than 10 degrees (dead zone)
+        if abs(angle) < 10.0:
             return False
 
         key = str(servo_id)
@@ -402,7 +629,7 @@ def auto_detect_port():
 
 def main():
     parser = argparse.ArgumentParser(description="Shadow Control - Real-time Teleoperation")
-    parser.add_argument("--camera", "-c", type=int, default=1, help="Camera index (default: 1)")
+    parser.add_argument("--camera", "-c", type=int, default=0, help="Camera index (default: 0)")
     parser.add_argument("--port", "-p", help="Serial port (auto-detected if not specified)")
     parser.add_argument("--baudrate", "-b", type=int, default=500000, help="Servo baudrate")
     parser.add_argument("--smoothing", "-s", type=float, default=0.4, help="Smoothing factor 0-1 (default: 0.4)")
@@ -418,8 +645,8 @@ def main():
         base_options=base_options,
         running_mode=vision.RunningMode.VIDEO,
         num_poses=1,
-        min_pose_detection_confidence=0.5,
-        min_tracking_confidence=0.5,
+        min_pose_detection_confidence=0.90,
+        min_tracking_confidence=0.90,
     )
     pose_landmarker = vision.PoseLandmarker.create_from_options(options)
 
@@ -437,7 +664,7 @@ def main():
             print("Warning: No serial port found - servo control disabled")
 
     # Initialize camera
-    cap = cv2.VideoCapture(args.camera)
+    cap = cv2.VideoCapture(args.camera, cv2.CAP_AVFOUNDATION)
     if not cap.isOpened():
         print(f"Error: Cannot open camera {args.camera}")
         return 1
@@ -505,9 +732,70 @@ def main():
                 for key in pose_angles:
                     if key in pose_zero_offsets and not np.isnan(pose_zero_offsets[key]):
                         pose_angles[key] = pose_angles[key] - pose_zero_offsets[key]
+                        # Clamp to 0-180 range to prevent negative values
+                        if not np.isnan(pose_angles[key]):
+                            pose_angles[key] = max(0.0, min(180.0, pose_angles[key]))
 
                 # Smooth angles
                 pose_angles = smoother.smooth_dict(pose_angles)
+
+                # Draw angle arcs on joints
+                h, w = frame.shape[:2]
+                
+                # Helper to convert landmark to pixel coordinates
+                def to_px(idx):
+                    lm = landmarks[idx]
+                    if lm.visibility > 0.5:
+                        return (int(lm.x * w), int(lm.y * h))
+                    return None
+                
+                # Left elbow flexion arc
+                l_sh_px = to_px(11)
+                l_el_px = to_px(13)
+                l_wr_px = to_px(15)
+                if l_sh_px and l_el_px and l_wr_px and not np.isnan(pose_angles.get("left_elbow", float("nan"))):
+                    frame = draw_angle_arc(frame, l_sh_px, l_el_px, l_wr_px, 
+                                          pose_angles.get("left_elbow", 0),
+                                          color=(255, 0, 255), alpha=0.3, radius=30)
+                
+                # Right elbow flexion arc
+                r_sh_px = to_px(12)
+                r_el_px = to_px(14)
+                r_wr_px = to_px(16)
+                if r_sh_px and r_el_px and r_wr_px and not np.isnan(pose_angles.get("right_elbow", float("nan"))):
+                    frame = draw_angle_arc(frame, r_sh_px, r_el_px, r_wr_px,
+                                          pose_angles.get("right_elbow", 0),
+                                          color=(255, 0, 255), alpha=0.3, radius=30)
+                
+                # Left shoulder abduction arc
+                l_hip_px = to_px(23)
+                if l_hip_px and l_sh_px and l_el_px and not np.isnan(pose_angles.get("left_abd", float("nan"))):
+                    frame = draw_angle_arc(frame, l_hip_px, l_sh_px, l_el_px,
+                                          pose_angles.get("left_abd", 0),
+                                          color=(0, 255, 255), alpha=0.3, radius=35)
+                
+                # Right shoulder abduction arc
+                r_hip_px = to_px(24)
+                if r_hip_px and r_sh_px and r_el_px and not np.isnan(pose_angles.get("right_abd", float("nan"))):
+                    frame = draw_angle_arc(frame, r_hip_px, r_sh_px, r_el_px,
+                                          pose_angles.get("right_abd", 0),
+                                          color=(0, 255, 255), alpha=0.3, radius=35)
+                
+                # Left shoulder extension arc (slightly offset to avoid overlap)
+                if l_hip_px and l_sh_px and l_el_px and not np.isnan(pose_angles.get("left_ext", float("nan"))):
+                    # Offset shoulder position slightly for extension arc
+                    offset_sh_px = (l_sh_px[0] - 20, l_sh_px[1])
+                    frame = draw_angle_arc(frame, l_hip_px, offset_sh_px, l_el_px,
+                                          pose_angles.get("left_ext", 0),
+                                          color=(255, 255, 0), alpha=0.3, radius=30)
+                
+                # Right shoulder extension arc (slightly offset to avoid overlap)
+                if r_hip_px and r_sh_px and r_el_px and not np.isnan(pose_angles.get("right_ext", float("nan"))):
+                    # Offset shoulder position slightly for extension arc
+                    offset_sh_px = (r_sh_px[0] + 20, r_sh_px[1])
+                    frame = draw_angle_arc(frame, r_hip_px, offset_sh_px, r_el_px,
+                                          pose_angles.get("right_ext", 0),
+                                          color=(255, 255, 0), alpha=0.3, radius=30)
 
                 # Map to servo angles
                 for servo_id, config in SERVO_MAPPING.items():
