@@ -27,8 +27,38 @@ Usage:
 
 import glob
 import json
+import logging
 import os
 import time
+
+# Configure module logger
+logger = logging.getLogger(__name__)
+
+def configure_logging(level=logging.INFO, log_file=None):
+    """
+    Configure logging for servo controller.
+
+    Args:
+        level: Logging level (DEBUG, INFO, WARNING, ERROR)
+        log_file: Optional path to log file
+    """
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%H:%M:%S'
+    )
+
+    # Console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    logger.addHandler(console_handler)
+
+    # File handler (optional)
+    if log_file:
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+
+    logger.setLevel(level)
 
 # STS3215 constants
 ADDR_TORQUE_ENABLE = 40
@@ -38,6 +68,17 @@ ADDR_GOAL_SPEED = 46
 ADDR_CURRENT_POSITION = 56
 ADDR_CURRENT_SPEED = 58
 ADDR_CURRENT_LOAD = 60
+ADDR_CURRENT_VOLTAGE = 62  # Voltage in 0.1V units
+ADDR_CURRENT_TEMPERATURE = 63  # Temperature in Celsius
+
+# Error byte bit flags (from ping response)
+ERROR_VOLTAGE = 0x01
+ERROR_ANGLE_LIMIT = 0x02
+ERROR_OVERHEAT = 0x04
+ERROR_RANGE = 0x08
+ERROR_CHECKSUM = 0x10
+ERROR_OVERLOAD = 0x20
+ERROR_INSTRUCTION = 0x40
 
 DEFAULT_SERVO_SPEED = 2000  # Steps/second (0 means "don't move", not "max speed")
 
@@ -130,7 +171,7 @@ class RawServoController:
             self.connected = True
             return True
         except Exception as e:
-            print(f"RawServoController: Failed to open {self.port}: {e}")
+            logger.error(f"RawServoController: Failed to open {self.port}: {e}")
             return False
 
     def disconnect(self):
@@ -214,6 +255,70 @@ class RawServoController:
         os.write(self.fd, packet)
         time.sleep(0.01)
 
+    def read_temperature(self, servo_id):
+        """
+        Read servo temperature in Celsius.
+
+        Returns:
+            int: Temperature in Celsius, or None if read failed
+        """
+        self._flush()
+        packet = bytes([0xFF, 0xFF, servo_id, 0x04, 0x02, ADDR_CURRENT_TEMPERATURE, 1])
+        packet += bytes([self._checksum(packet[2:])])
+        os.write(self.fd, packet)
+        time.sleep(0.02)
+        try:
+            resp = os.read(self.fd, 64)
+            if resp and len(resp) >= 7:
+                return resp[5]
+        except:
+            pass
+        return None
+
+    def read_load(self, servo_id):
+        """
+        Read current load (torque) from servo.
+
+        Returns:
+            tuple: (load_value, direction) where direction is 1 for CW, 0 for CCW
+                   load_value is 0-1023 (10-bit), or (None, None) if failed
+        """
+        self._flush()
+        packet = bytes([0xFF, 0xFF, servo_id, 0x04, 0x02, ADDR_CURRENT_LOAD, 2])
+        packet += bytes([self._checksum(packet[2:])])
+        os.write(self.fd, packet)
+        time.sleep(0.02)
+        try:
+            resp = os.read(self.fd, 64)
+            if resp and len(resp) >= 8:
+                load = resp[5] | (resp[6] << 8)
+                direction = (load >> 10) & 0x01
+                load_value = load & 0x03FF
+                return load_value, direction
+        except:
+            pass
+        return None, None
+
+    def read_voltage(self, servo_id):
+        """
+        Read supply voltage in volts.
+
+        Returns:
+            float: Voltage in V, or None if read failed
+        """
+        self._flush()
+        packet = bytes([0xFF, 0xFF, servo_id, 0x04, 0x02, ADDR_CURRENT_VOLTAGE, 1])
+        packet += bytes([self._checksum(packet[2:])])
+        os.write(self.fd, packet)
+        time.sleep(0.02)
+        try:
+            resp = os.read(self.fd, 64)
+            if resp and len(resp) >= 7:
+                return resp[5] / 10.0  # Convert to volts
+        except:
+            pass
+        return None
+
 
 def _swap_bytes(value):
     """
@@ -246,18 +351,18 @@ class SDKServoController:
     def connect(self):
         """Open serial connection via SDK."""
         if not HAS_SDK:
-            print("SDKServoController: SDK not available")
+            logger.error("SDKServoController: SDK not available")
             return False
 
         self.port_handler = PortHandler(self.port)
         self.packet_handler = PacketHandler(1)  # Protocol version 1
 
         if not self.port_handler.openPort():
-            print(f"SDKServoController: Failed to open {self.port}")
+            logger.error(f"SDKServoController: Failed to open {self.port}")
             return False
 
         if not self.port_handler.setBaudRate(self.baudrate):
-            print(f"SDKServoController: Failed to set baudrate {self.baudrate}")
+            logger.error(f"SDKServoController: Failed to set baudrate {self.baudrate}")
             return False
 
         self.connected = True
@@ -318,6 +423,53 @@ class SDKServoController:
             self.port_handler, servo_id, ADDR_GOAL_SPEED, speed
         )
 
+    def read_temperature(self, servo_id):
+        """
+        Read servo temperature in Celsius.
+
+        Returns:
+            int: Temperature in Celsius, or None if read failed
+        """
+        temp, result, _ = self.packet_handler.read1ByteTxRx(
+            self.port_handler, servo_id, ADDR_CURRENT_TEMPERATURE
+        )
+        if result != COMM_SUCCESS:
+            return None
+        return temp
+
+    def read_load(self, servo_id):
+        """
+        Read current load (torque) from servo.
+
+        Returns:
+            tuple: (load_value, direction) where direction is 1 for CW, 0 for CCW
+                   load_value is 0-1023 (10-bit), or (None, None) if failed
+        """
+        load, result, _ = self.packet_handler.read2ByteTxRx(
+            self.port_handler, servo_id, ADDR_CURRENT_LOAD
+        )
+        if result != COMM_SUCCESS:
+            return None, None
+        # Swap bytes to fix SDK endianness
+        load = _swap_bytes(load)
+        direction = (load >> 10) & 0x01
+        load_value = load & 0x03FF
+        return load_value, direction
+
+    def read_voltage(self, servo_id):
+        """
+        Read supply voltage in volts.
+
+        Returns:
+            float: Voltage in V, or None if read failed
+        """
+        voltage, result, _ = self.packet_handler.read1ByteTxRx(
+            self.port_handler, servo_id, ADDR_CURRENT_VOLTAGE
+        )
+        if result != COMM_SUCCESS:
+            return None
+        return voltage / 10.0  # Convert to volts
+
 
 class ServoController:
     """
@@ -335,9 +487,12 @@ class ServoController:
         - Angle <-> steps conversion
     """
 
-    # Rate limiting settings (disabled for now)
-    MAX_ANGLE_CHANGE_PER_FRAME = 360.0  # Disabled - allow full range
-    DEAD_ZONE_DEGREES = 0.0  # Disabled - respond to all changes
+    # Rate limiting settings for smooth, safe motion
+    # MAX_ANGLE_CHANGE_PER_FRAME: Limits degrees per frame to prevent jerky motion
+    #   At 30 FPS, 30°/frame = 900°/sec max velocity
+    # DEAD_ZONE_DEGREES: Ignore small changes to reduce jitter from sensor noise
+    MAX_ANGLE_CHANGE_PER_FRAME = 30.0  # Prevents violent jumps from gimbal lock
+    DEAD_ZONE_DEGREES = 2.0  # Filter out sensor noise
 
     def __init__(self, port, baudrate=DEFAULT_BAUDRATE):
         self.port = port
@@ -361,7 +516,7 @@ class ServoController:
             return False
 
         self.connected = True
-        print(f"ServoController: Connected to {self.port} at {self.baudrate} bps")
+        logger.info(f"Connected to {self.port} at {self.baudrate} bps")
         return True
 
     def disconnect(self):
@@ -383,16 +538,16 @@ class ServoController:
         if os.path.exists(filepath):
             with open(filepath, "r") as f:
                 self.calibration = json.load(f)
-            print(f"ServoController: Loaded calibration for servos {list(self.calibration.keys())}")
+            logger.info(f"Loaded calibration for servos {list(self.calibration.keys())}")
             return True
-        print(f"ServoController: Calibration file not found: {filepath}")
+        logger.warning(f"Calibration file not found: {filepath}")
         return False
 
     def save_calibration(self, filepath):
         """Save current calibration to file."""
         with open(filepath, "w") as f:
             json.dump(self.calibration, f, indent=2)
-        print(f"ServoController: Saved calibration to {filepath}")
+        logger.info(f"Saved calibration to {filepath}")
 
     def calibrate(self, servo_ids, names=None):
         """
@@ -408,14 +563,14 @@ class ServoController:
         for sid in servo_ids:
             pos = self.read_position_raw(sid)
             if pos is None:
-                print(f"  ID {sid}: FAILED TO READ")
+                logger.error(f"ID {sid}: FAILED TO READ")
                 continue
 
             self.calibration[str(sid)] = {
                 "zero_offset": pos,
                 "name": names.get(sid, f"servo_{sid}")
             }
-            print(f"  ID {sid}: zero = {pos} (raw steps)")
+            logger.debug(f"ID {sid}: zero = {pos} (raw steps)")
 
     def ping(self, servo_id):
         """Ping a servo to check if it's responding."""
@@ -441,6 +596,134 @@ class ServoController:
             return
         self._ctrl.set_speed(servo_id, speed)
 
+    def read_temperature(self, servo_id):
+        """Read servo temperature in Celsius."""
+        if not self.connected:
+            return None
+        return self._ctrl.read_temperature(servo_id)
+
+    def read_load(self, servo_id):
+        """
+        Read current load (torque) from servo.
+
+        Returns:
+            tuple: (load_value, direction) or (None, None) if failed
+        """
+        if not self.connected:
+            return None, None
+        return self._ctrl.read_load(servo_id)
+
+    def read_voltage(self, servo_id):
+        """Read supply voltage in volts."""
+        if not self.connected:
+            return None
+        return self._ctrl.read_voltage(servo_id)
+
+    def get_servo_status(self, servo_id):
+        """
+        Get comprehensive status for a servo including diagnostics.
+
+        Returns:
+            dict: {
+                'online': bool,
+                'error': int or None (error byte from ping),
+                'errors': list of error strings,
+                'position': int (raw steps),
+                'temperature': int (Celsius),
+                'voltage': float (V),
+                'load': int (0-1023),
+                'load_direction': int (0=CCW, 1=CW)
+            }
+        """
+        status = {
+            'online': False,
+            'error': None,
+            'errors': [],
+            'position': None,
+            'temperature': None,
+            'voltage': None,
+            'load': None,
+            'load_direction': None,
+        }
+
+        if not self.connected:
+            return status
+
+        # Ping to check online status and get error byte
+        online, error = self._ctrl.ping(servo_id)
+        status['online'] = online
+        status['error'] = error
+
+        if not online:
+            return status
+
+        # Decode error flags
+        if error:
+            if error & ERROR_VOLTAGE:
+                status['errors'].append('voltage')
+            if error & ERROR_ANGLE_LIMIT:
+                status['errors'].append('angle_limit')
+            if error & ERROR_OVERHEAT:
+                status['errors'].append('overheat')
+            if error & ERROR_RANGE:
+                status['errors'].append('range')
+            if error & ERROR_CHECKSUM:
+                status['errors'].append('checksum')
+            if error & ERROR_OVERLOAD:
+                status['errors'].append('overload')
+            if error & ERROR_INSTRUCTION:
+                status['errors'].append('instruction')
+
+        # Read position
+        status['position'] = self._ctrl.read_position(servo_id)
+
+        # Read temperature
+        status['temperature'] = self._ctrl.read_temperature(servo_id)
+
+        # Read voltage
+        status['voltage'] = self._ctrl.read_voltage(servo_id)
+
+        # Read load
+        load, direction = self._ctrl.read_load(servo_id)
+        status['load'] = load
+        status['load_direction'] = direction
+
+        return status
+
+    def check_servo_health(self, servo_id, temp_warn=60, temp_crit=70, load_warn=800):
+        """
+        Check servo health and return warnings.
+
+        Args:
+            servo_id: Servo ID to check
+            temp_warn: Temperature warning threshold (Celsius)
+            temp_crit: Temperature critical threshold (Celsius)
+            load_warn: Load warning threshold (0-1023)
+
+        Returns:
+            list: Warning messages (empty if healthy)
+        """
+        warnings = []
+        status = self.get_servo_status(servo_id)
+
+        if not status['online']:
+            warnings.append(f"Servo {servo_id}: OFFLINE")
+            return warnings
+
+        if status['errors']:
+            warnings.append(f"Servo {servo_id}: ERRORS: {', '.join(status['errors'])}")
+
+        if status['temperature'] is not None:
+            if status['temperature'] >= temp_crit:
+                warnings.append(f"Servo {servo_id}: CRITICAL TEMP {status['temperature']}°C")
+            elif status['temperature'] >= temp_warn:
+                warnings.append(f"Servo {servo_id}: HIGH TEMP {status['temperature']}°C")
+
+        if status['load'] is not None and status['load'] >= load_warn:
+            warnings.append(f"Servo {servo_id}: HIGH LOAD {status['load']}/1023")
+
+        return warnings
+
     def initialize_servos(self, servo_ids, speed=None):
         """
         Initialize servos with default speed for movement.
@@ -458,7 +741,7 @@ class ServoController:
         if speed is None:
             speed = DEFAULT_SERVO_SPEED
 
-        print(f"ServoController: Initializing {len(servo_ids)} servos with speed={speed}")
+        logger.info(f"Initializing {len(servo_ids)} servos with speed={speed}")
         for sid in servo_ids:
             self._ctrl.set_speed(sid, speed)
             time.sleep(0.005)
@@ -549,10 +832,15 @@ class ServoController:
         if not self.connected:
             return
 
-        # Use individual writes (sync write disabled for now due to byte-order issues)
-        for servo_id, angle in angle_dict.items():
-            self.write_angle(servo_id, angle, force=force)
-        time.sleep(0.002)
+        # Use sync write for SDK controller (4x faster than individual writes)
+        # Key insight: addParam() passes raw bytes directly to wire - NO swap needed
+        if HAS_SYNC_WRITE and not self._use_raw:
+            self._sync_write_angles(angle_dict, force=force)
+        else:
+            # Fall back to individual writes for raw controller
+            for servo_id, angle in angle_dict.items():
+                self.write_angle(servo_id, angle, force=force)
+            time.sleep(0.002)
 
     def _sync_write_angles(self, angle_dict, force=False):
         """Internal: Use sync write for efficient multi-servo commands."""
@@ -624,5 +912,5 @@ def scan_servos(ctrl, id_range=range(1, 20)):
         if success:
             pos = ctrl.read_position_raw(sid)
             found.append((sid, pos))
-            print(f"  ID {sid}: position {pos}")
+            logger.debug(f"Found ID {sid}: position {pos}")
     return found

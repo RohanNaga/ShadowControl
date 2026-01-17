@@ -20,6 +20,7 @@ Controls:
 import argparse
 import csv
 import json
+import logging
 import os
 import sys
 import time
@@ -27,6 +28,14 @@ import urllib.request
 from datetime import datetime
 
 import cv2
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%H:%M:%S'
+)
+logger = logging.getLogger(__name__)
 import mediapipe as mp
 from mediapipe.tasks import python as mp_tasks
 from mediapipe.tasks.python import vision
@@ -452,7 +461,7 @@ def draw_landmarks(frame, landmarks):
 # Servo Control (imported from src.servo_controller)
 # ============================================================================
 
-from src.servo_controller import ServoController, auto_detect_port as _auto_detect_port
+from src.servo_controller import ServoController, auto_detect_port as _auto_detect_port, configure_logging
 
 
 # ============================================================================
@@ -502,12 +511,14 @@ def put_text_with_bg(img, text, org, font_scale=0.7, thickness=2, pad=6, color=(
     cv2.putText(img, text, (x, y), font, font_scale, color, thickness, cv2.LINE_AA)
 
 
-def draw_hud(frame, pose_angles, servo_angles, servo_enabled, fps, encoder_angles=None, raw_positions=None):
+def draw_hud(frame, pose_angles, servo_angles, servo_enabled, fps, encoder_angles=None, raw_positions=None, temperatures=None):
     """Draw heads-up display with angle info."""
     if encoder_angles is None:
         encoder_angles = {}
     if raw_positions is None:
         raw_positions = {}
+    if temperatures is None:
+        temperatures = {}
     h, w = frame.shape[:2]
 
     # Status bar (top)
@@ -546,7 +557,19 @@ def draw_hud(frame, pose_angles, servo_angles, servo_enabled, fps, encoder_angle
     for servo_id, config in SERVO_MAPPING.items():
         enc = encoder_angles.get(servo_id)
         raw = raw_positions.get(servo_id)
+        temp = temperatures.get(servo_id)
         name = config['name'].replace("_Shoulder", "_Sh").replace("_Elbow", "_El")
+
+        # Determine temperature color (green < 50C, yellow < 60C, red >= 60C)
+        temp_str = ""
+        temp_color = (0, 255, 0)
+        if temp is not None:
+            temp_str = f" {temp}C"
+            if temp >= 60:
+                temp_color = (0, 0, 255)  # Red
+            elif temp >= 50:
+                temp_color = (0, 165, 255)  # Orange
+
         if enc is not None and raw is not None:
             text = f"{name}: {enc:+6.1f} ({raw})"
             put_text_with_bg(frame, text, (col3_x, y), font_scale=0.55, color=(0, 255, 0))
@@ -556,6 +579,10 @@ def draw_hud(frame, pose_angles, servo_angles, servo_enabled, fps, encoder_angle
         else:
             text = f"{name}: ---"
             put_text_with_bg(frame, text, (col3_x, y), font_scale=0.55, color=(128, 128, 128))
+
+        # Show temperature next to encoder reading
+        if temp_str:
+            put_text_with_bg(frame, temp_str, (col3_x + 200, y), font_scale=0.5, color=temp_color)
         y += 30
 
     # Controls hint (bottom)
@@ -782,7 +809,11 @@ def main():
     parser.add_argument("--smoothing", "-s", type=float, default=0.4, help="Smoothing factor 0-1 (default: 0.4)")
     parser.add_argument("--no-servo", action="store_true", help="Disable servo output (visualization only)")
     parser.add_argument("--log", "-l", action="store_true", default=True, help="Enable data logging to CSV")
+    parser.add_argument("--debug", "-d", action="store_true", help="Enable debug logging")
     args = parser.parse_args()
+
+    # Configure servo controller logging
+    configure_logging(level=logging.DEBUG if args.debug else logging.INFO)
 
     # Download model if needed
     model_path = download_model()
@@ -882,6 +913,7 @@ def main():
             servo_angles = {}
             encoder_angles = {}
             raw_positions = {}
+            temperatures = {}
 
             if results.pose_landmarks and len(results.pose_landmarks) > 0:
                 landmarks = results.pose_landmarks[0]  # First detected pose
@@ -984,19 +1016,33 @@ def main():
                 # Read encoder positions (every 10th frame to reduce bus contention)
                 encoder_angles = {}
                 raw_positions = {}
+                temperatures = {}
                 if servo_ctrl and servo_ctrl.connected and frame_timestamp_ms % 333 < 34:  # ~every 10 frames
                     time.sleep(0.005)  # 5ms delay after writes before reading
                     encoder_angles = servo_ctrl.read_angles(SERVO_MAPPING.keys())
                     for sid in SERVO_MAPPING.keys():
                         raw_positions[sid] = servo_ctrl.read_position_raw(sid)
 
+                # Read temperatures less frequently (every ~3 seconds)
+                if servo_ctrl and servo_ctrl.connected and frame_timestamp_ms % 3000 < 34:
+                    for sid in SERVO_MAPPING.keys():
+                        temp = servo_ctrl.read_temperature(sid)
+                        if temp is not None:
+                            temperatures[sid] = temp
+
+                    # Check servo health and log warnings
+                    for sid in SERVO_MAPPING.keys():
+                        warnings = servo_ctrl.check_servo_health(sid)
+                        for warning in warnings:
+                            logger.warning(warning)
+
                 # Log data and check for frame capture
                 if data_logger:
                     data_logger.log(pose_angles, servo_angles, encoder_angles)
                     data_logger.check_capture(frame, pose_angles, servo_angles)
 
-            # Draw HUD with encoder readings
-            draw_hud(frame, pose_angles, servo_angles, servo_enabled and servo_ctrl is not None, fps, encoder_angles, raw_positions)
+            # Draw HUD with encoder readings and temperatures
+            draw_hud(frame, pose_angles, servo_angles, servo_enabled and servo_ctrl is not None, fps, encoder_angles, raw_positions, temperatures)
 
             # Show frame
             cv2.imshow("Shadow Control - Teleoperation", frame)
