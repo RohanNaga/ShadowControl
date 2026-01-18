@@ -60,78 +60,84 @@ def put_text_with_bg(img, text, org, font_scale=0.55, thickness=1, pad=4):
     # background box
     cv2.rectangle(img, (x - pad, y - th - pad), (x + tw + pad, y + baseline + pad), (0, 0, 0), -1)
     cv2.putText(img, text, (x, y), font, font_scale, (255, 255, 255), thickness, cv2.LINE_AA)
+    
 
-cap = cv2.VideoCapture(1)
+def pose_estimation():
 
-while cap.isOpened():
-    ret, frame = cap.read()
-    if not ret:
-        break
+    cap = cv2.VideoCapture(1)
 
-    h, w = frame.shape[:2]
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret:
+            break
 
-    image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    results = pose.process(image_rgb)
+        h, w = frame.shape[:2]
 
-    if results.pose_landmarks:
-        lm = results.pose_landmarks.landmark
+        image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = pose.process(image_rgb)
 
-        # Draw skeleton
-        mp_draw.draw_landmarks(
-            frame,
-            results.pose_landmarks,
-            mp_pose.POSE_CONNECTIONS,
-            landmark_drawing_spec=mp_styles.get_default_pose_landmarks_style(),
-        )
+        if results.pose_landmarks:
+            lm = results.pose_landmarks.landmark
 
-        def p(i):
-            return np.array([lm[i].x, lm[i].y, lm[i].z], dtype=np.float32)
+            # Draw skeleton
+            mp_draw.draw_landmarks(
+                frame,
+                results.pose_landmarks,
+                mp_pose.POSE_CONNECTIONS,
+                landmark_drawing_spec=mp_styles.get_default_pose_landmarks_style(),
+            )
 
-        # 3D-ish normalized coords (mediapipe)
-        L_SH, L_EL, L_WR, L_HIP = p(11), p(13), p(15), p(23)
-        R_SH, R_EL, R_WR, R_HIP = p(12), p(14), p(16), p(24)
+            def p(i):
+                return np.array([lm[i].x, lm[i].y, lm[i].z], dtype=np.float32)
 
-        left_elbow = elbow_flexion(L_SH, L_EL, L_WR)
-        right_elbow = elbow_flexion(R_SH, R_EL, R_WR)
+            # 3D-ish normalized coords (mediapipe)
+            L_SH, L_EL, L_WR, L_HIP = p(11), p(13), p(15), p(23)
+            R_SH, R_EL, R_WR, R_HIP = p(12), p(14), p(16), p(24)
 
-        left_abd = shoulder_abduction(L_HIP, L_SH, L_EL)
-        right_abd = shoulder_abduction(R_HIP, R_SH, R_EL)
+            left_elbow = elbow_flexion(L_SH, L_EL, L_WR)
+            right_elbow = elbow_flexion(R_SH, R_EL, R_WR)
 
-        left_ext = shoulder_extension(L_HIP, L_SH, L_EL)
-        right_ext = shoulder_extension(R_HIP, R_SH, R_EL)
+            left_abd = shoulder_abduction(L_HIP, L_SH, L_EL)
+            right_abd = shoulder_abduction(R_HIP, R_SH, R_EL)
 
-        # --- HUD (top-left) ---
-        hud_lines = [
-            "Angles (deg)",
-            f"L Shoulder Abd: {left_abd:5.1f}   R: {right_abd:5.1f}",
-            f"L Shoulder Ext: {left_ext:5.1f}   R: {right_ext:5.1f}",
-            f"L Elbow Flex:   {left_elbow:5.1f}   R: {right_elbow:5.1f}",
-            "ESC to quit",
-        ]
+            left_ext = shoulder_extension(L_HIP, L_SH, L_EL)
+            right_ext = shoulder_extension(R_HIP, R_SH, R_EL)
 
-        x0, y0 = 12, 24
-        for i, line in enumerate(hud_lines):
-            put_text_with_bg(frame, line, (x0, y0 + i * 22), font_scale=0.55, thickness=1)
+            # --- HUD (top-left) ---
+            hud_lines = [
+                "Angles (deg)",
+                f"L Shoulder Abd: {left_abd:5.1f}   R: {right_abd:5.1f}",
+                f"L Shoulder Ext: {left_ext:5.1f}   R: {right_ext:5.1f}",
+                f"L Elbow Flex:   {left_elbow:5.1f}   R: {right_elbow:5.1f}",
+                "ESC to quit",
+            ]
 
-        # --- Per-joint labels near shoulder/elbow (optional but useful) ---
-        # Left shoulder + elbow
-        l_sh_px = to_px(lm, 11, w, h)
-        l_el_px = to_px(lm, 13, w, h)
-        put_text_with_bg(frame, f"L Abd {left_abd:4.0f}", (l_sh_px[0] + 10, l_sh_px[1] - 10), font_scale=0.5)
-        put_text_with_bg(frame, f"L Ext {left_ext:4.0f}", (l_sh_px[0] + 10, l_sh_px[1] + 12), font_scale=0.5)
-        put_text_with_bg(frame, f"L Flex {left_elbow:4.0f}", (l_el_px[0] + 10, l_el_px[1] - 10), font_scale=0.5)
+            x0, y0 = 12, 24
+            for i, line in enumerate(hud_lines):
+                put_text_with_bg(frame, line, (x0, y0 + i * 22), font_scale=0.55, thickness=1)
 
-        # Right shoulder + elbow
-        r_sh_px = to_px(lm, 12, w, h)
-        r_el_px = to_px(lm, 14, w, h)
-        put_text_with_bg(frame, f"R Abd {right_abd:4.0f}", (r_sh_px[0] + 10, r_sh_px[1] - 10), font_scale=0.5)
-        put_text_with_bg(frame, f"R Ext {right_ext:4.0f}", (r_sh_px[0] + 10, r_sh_px[1] + 12), font_scale=0.5)
-        put_text_with_bg(frame, f"R Flex {right_elbow:4.0f}", (r_el_px[0] + 10, r_el_px[1] - 10), font_scale=0.5)
+            # --- Per-joint labels near shoulder/elbow (optional but useful) ---
+            # Left shoulder + elbow
+            l_sh_px = to_px(lm, 11, w, h)
+            l_el_px = to_px(lm, 13, w, h)
+            put_text_with_bg(frame, f"L Abd {left_abd:4.0f}", (l_sh_px[0] + 10, l_sh_px[1] - 10), font_scale=0.5)
+            put_text_with_bg(frame, f"L Ext {left_ext:4.0f}", (l_sh_px[0] + 10, l_sh_px[1] + 12), font_scale=0.5)
+            put_text_with_bg(frame, f"L Flex {left_elbow:4.0f}", (l_el_px[0] + 10, l_el_px[1] - 10), font_scale=0.5)
 
-    cv2.imshow("Pose Estimation", frame)
+            # Right shoulder + elbow
+            r_sh_px = to_px(lm, 12, w, h)
+            r_el_px = to_px(lm, 14, w, h)
+            put_text_with_bg(frame, f"R Abd {right_abd:4.0f}", (r_sh_px[0] + 10, r_sh_px[1] - 10), font_scale=0.5)
+            put_text_with_bg(frame, f"R Ext {right_ext:4.0f}", (r_sh_px[0] + 10, r_sh_px[1] + 12), font_scale=0.5)
+            put_text_with_bg(frame, f"R Flex {right_elbow:4.0f}", (r_el_px[0] + 10, r_el_px[1] - 10), font_scale=0.5)
 
-    if cv2.waitKey(1) & 0xFF == 27:
-        break
+        cv2.imshow("Pose Estimation", frame)
 
-cap.release()
-cv2.destroyAllWindows()
+        if cv2.waitKey(1) & 0xFF == 27:
+            break
+
+    cap.release()
+    cv2.destroyAllWindows()
+
+if __name__ == "__main__":
+    pose_estimation()
