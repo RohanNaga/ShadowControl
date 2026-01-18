@@ -22,5 +22,45 @@
   "10": {
     "zero_offset": 2048,
     "name": "L_Elbow"
+  },
+  "13": {
+    "zero_offset": 85,
+    "name": "R_Hip"
+  },
+  "14": {
+    "zero_offset": 3345,
+    "name": "R_Thigh"
+  },
+  "15": {
+    "zero_offset": 310,
+    "name": "R_Knee"
+  },
+  "16": {
+    "zero_offset": 304,
+    "name": "R_Shin"
+  },
+  "17": {
+    "zero_offset": 3904,
+    "name": "R_Ankle"
+  },
+  "18": {
+    "zero_offset": 3883,
+    "name": "L_Hip"
+  },
+  "19": {
+    "zero_offset": 384,
+    "name": "L_Thigh"
+  },
+  "20": {
+    "zero_offset": 3950,
+    "name": "L_Knee"
+  },
+  "21": {
+    "zero_offset": 382,
+    "name": "L_Shin"
+  },
+  "22": {
+    "zero_offset": 151,
+    "name": "L_Ankle"
   }
 }

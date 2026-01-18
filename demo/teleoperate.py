@@ -3,15 +3,23 @@
 Shadow Control - Real-time Teleoperation
 
 Captures pose from webcam using MediaPipe and commands arm servos in real-time.
+Supports arm teleoperation mode and leg servo test mode.
 
 Usage:
+    # Arm mode (default) - teleoperate arm servos with pose detection
     python demo/teleoperate.py                    # Run with defaults
+    python demo/teleoperate.py --mode arm         # Explicitly use arm mode
     python demo/teleoperate.py --camera 0         # Use camera index 0
     python demo/teleoperate.py --port /dev/ttyUSB0  # Specify serial port
     python demo/teleoperate.py --no-servo         # Pose visualization only
     python demo/teleoperate.py --smoothing 0.3    # Adjust smoothing (0-1)
 
-Controls:
+    # Leg mode - test each leg servo one at a time
+    python demo/teleoperate.py --mode leg                    # Run leg test
+    python demo/teleoperate.py --mode leg --test-angle 30    # Custom test angle
+    python demo/teleoperate.py --mode leg --hold-time 2.0    # Longer hold time
+
+Controls (arm mode):
     ESC - Quit
     SPACE - Toggle servo control (pause/resume)
     R - Reset servos to neutral (0 degrees)
@@ -70,6 +78,23 @@ SERVO_MAPPING = {
     8: {"name": "L_Shoulder1", "pose_key": "left_ext", "scale": 1.0},
     9: {"name": "L_Shoulder2", "pose_key": "left_abd", "scale": 1.0},
     10: {"name": "L_Elbow", "pose_key": "left_elbow", "scale": 1.0},
+}
+
+# Leg servo mapping (from README.md)
+# Right Leg: IDs 13-17, Left Leg: IDs 18-22
+LEG_SERVO_MAPPING = {
+    # Right Leg
+    13: {"name": "R_Hip", "joint": "Right Hip"},
+    14: {"name": "R_Thigh", "joint": "Right Thigh"},
+    15: {"name": "R_Knee", "joint": "Right Knee"},
+    16: {"name": "R_Shin", "joint": "Right Shin"},
+    17: {"name": "R_Ankle", "joint": "Right Ankle"},
+    # Left Leg
+    18: {"name": "L_Hip", "joint": "Left Hip"},
+    19: {"name": "L_Thigh", "joint": "Left Thigh"},
+    20: {"name": "L_Knee", "joint": "Left Knee"},
+    21: {"name": "L_Shin", "joint": "Left Shin"},
+    22: {"name": "L_Ankle", "joint": "Left Ankle"},
 }
 
 # Neutral positions from calibration - used for reset (12-bit range: 0-4095)
@@ -798,12 +823,153 @@ auto_detect_port = _auto_detect_port
 
 
 # ============================================================================
+# Leg Test Mode
+# ============================================================================
+
+
+def run_leg_test(port, baudrate, test_angle=20.0, hold_time=1.0):
+    """
+    Test leg servos by moving each one at a time.
+    
+    Args:
+        port: Serial port for servo communication
+        baudrate: Baudrate for serial communication
+        test_angle: Angle in degrees to move each servo (default: 20°)
+        hold_time: Time to hold at each position in seconds (default: 1.0s)
+    """
+    print("\n" + "=" * 60)
+    print("Shadow Control - Leg Servo Test Mode")
+    print("=" * 60)
+    print(f"\nTest parameters:")
+    print(f"  - Test angle: ±{test_angle}°")
+    print(f"  - Hold time: {hold_time}s per position")
+    print(f"  - Port: {port}")
+    print(f"  - Baudrate: {baudrate}")
+    
+    # Initialize servo controller
+    servo_ctrl = ServoController(port, baudrate)
+    if not servo_ctrl.connect():
+        print("ERROR: Failed to connect to servo controller")
+        return 1
+    
+    print("\nLEG SERVO MAPPING:")
+    print("-" * 60)
+    print(f"{'ID':<4} {'Name':<10} {'Joint':<20}")
+    print("-" * 60)
+    for sid, cfg in LEG_SERVO_MAPPING.items():
+        print(f"{sid:<4} {cfg['name']:<10} {cfg['joint']:<20}")
+    print("-" * 60)
+    
+    # Read initial positions for all leg servos
+    print("\nReading initial servo positions...")
+    initial_positions = {}
+    for servo_id in LEG_SERVO_MAPPING.keys():
+        pos = servo_ctrl.read_position_raw(servo_id)
+        if pos is not None:
+            initial_positions[servo_id] = pos
+            config = LEG_SERVO_MAPPING[servo_id]
+            print(f"  ID {servo_id} ({config['name']}): position = {pos}")
+        else:
+            print(f"  ID {servo_id} ({LEG_SERVO_MAPPING[servo_id]['name']}): FAILED TO READ")
+        time.sleep(0.02)
+    
+    if not initial_positions:
+        print("\nERROR: No leg servos responded. Check connections.")
+        servo_ctrl.disconnect()
+        return 1
+    
+    # Initialize servos for movement
+    print("\nInitializing servos...")
+    servo_ctrl.initialize_servos(list(initial_positions.keys()))
+    
+    print("\n" + "=" * 60)
+    print("Starting leg servo test sequence...")
+    print("Press Ctrl+C to stop at any time")
+    print("=" * 60 + "\n")
+    
+    # Convert test angle to raw position delta (4096 steps = 360°)
+    steps_per_degree = 4096 / 360.0
+    test_steps = int(test_angle * steps_per_degree)
+    
+    try:
+        for servo_id in sorted(initial_positions.keys()):
+            config = LEG_SERVO_MAPPING[servo_id]
+            initial_pos = initial_positions[servo_id]
+            
+            print(f"\n--- Testing Servo {servo_id}: {config['name']} ({config['joint']}) ---")
+            print(f"    Initial position: {initial_pos}")
+            
+            # Move to positive offset
+            target_pos = initial_pos + test_steps
+            target_pos = max(0, min(4095, target_pos))  # Clamp to valid range
+            print(f"    Moving to +{test_angle}° (raw: {target_pos})...", end=" ", flush=True)
+            servo_ctrl.write_position_raw(servo_id, target_pos)
+            time.sleep(hold_time)
+            
+            # Read actual position
+            actual_pos = servo_ctrl.read_position_raw(servo_id)
+            if actual_pos is not None:
+                print(f"actual: {actual_pos}")
+            else:
+                print("read failed")
+            
+            # Move to negative offset
+            target_pos = initial_pos - test_steps
+            target_pos = max(0, min(4095, target_pos))  # Clamp to valid range
+            print(f"    Moving to -{test_angle}° (raw: {target_pos})...", end=" ", flush=True)
+            servo_ctrl.write_position_raw(servo_id, target_pos)
+            time.sleep(hold_time)
+            
+            # Read actual position
+            actual_pos = servo_ctrl.read_position_raw(servo_id)
+            if actual_pos is not None:
+                print(f"actual: {actual_pos}")
+            else:
+                print("read failed")
+            
+            # Return to initial position
+            print(f"    Returning to initial (raw: {initial_pos})...", end=" ", flush=True)
+            servo_ctrl.write_position_raw(servo_id, initial_pos)
+            time.sleep(hold_time / 2)
+            
+            # Read actual position
+            actual_pos = servo_ctrl.read_position_raw(servo_id)
+            if actual_pos is not None:
+                print(f"actual: {actual_pos}")
+            else:
+                print("read failed")
+            
+            print(f"    Servo {servo_id} test complete.")
+    
+    except KeyboardInterrupt:
+        print("\n\nTest interrupted by user.")
+    
+    finally:
+        # Return all servos to initial positions
+        print("\nReturning all servos to initial positions...")
+        for servo_id, initial_pos in initial_positions.items():
+            servo_ctrl.write_position_raw(servo_id, initial_pos)
+            time.sleep(0.05)
+        
+        time.sleep(0.5)
+        servo_ctrl.disconnect()
+    
+    print("\n" + "=" * 60)
+    print("Leg servo test complete!")
+    print("=" * 60 + "\n")
+    
+    return 0
+
+
+# ============================================================================
 # Main Teleoperation Loop
 # ============================================================================
 
 
 def main():
     parser = argparse.ArgumentParser(description="Shadow Control - Real-time Teleoperation")
+    parser.add_argument("--mode", "-m", choices=["arm", "leg"], default="arm",
+                        help="Control mode: 'arm' for arm teleoperation (default), 'leg' for leg servo test")
     parser.add_argument("--camera", "-c", type=int, default=1, help="Camera index (default: 1)")
     parser.add_argument("--port", "-p", help="Serial port (auto-detected if not specified)")
     parser.add_argument("--baudrate", "-b", type=int, default=500000, help="Servo baudrate")
@@ -811,7 +977,19 @@ def main():
     parser.add_argument("--no-servo", action="store_true", help="Disable servo output (visualization only)")
     parser.add_argument("--log", "-l", action="store_true", default=True, help="Enable data logging to CSV")
     parser.add_argument("--debug", "-d", action="store_true", help="Enable debug logging")
+    parser.add_argument("--test-angle", type=float, default=20.0,
+                        help="Test angle in degrees for leg mode (default: 20)")
+    parser.add_argument("--hold-time", type=float, default=1.0,
+                        help="Hold time in seconds for leg mode (default: 1.0)")
     args = parser.parse_args()
+    
+    # If leg mode is selected, run the leg test and exit
+    if args.mode == "leg":
+        port = args.port or auto_detect_port()
+        if not port:
+            print("ERROR: No serial port found. Specify with --port or connect a servo adapter.")
+            return 1
+        return run_leg_test(port, args.baudrate, args.test_angle, args.hold_time)
 
     # Configure servo controller logging
     configure_logging(level=logging.DEBUG if args.debug else logging.INFO)
