@@ -180,6 +180,98 @@ def configure_servo(port, packet, new_id, factory_only=False):
         return False
 
 
+SERVO_NAMES = {
+    5: "R_Shoulder1",
+    6: "R_Shoulder2",
+    7: "R_Elbow",
+    8: "L_Shoulder1",
+    9: "L_Shoulder2",
+    10: "L_Elbow",
+}
+
+NEUTRAL_POSITIONS = {
+    5: 2048,   # R_Shoulder1
+    6: 2048,   # R_Shoulder2
+    7: 2048,   # R_Elbow
+    8: 2048,   # L_Shoulder1
+    9: 2048,   # L_Shoulder2
+    10: 2048,  # L_Elbow
+}
+
+
+def read_zero_positions(port, packet):
+    """Read current positions of all servos (for calibration)."""
+    print("=" * 50)
+    print("READING ZERO POSITIONS")
+    print("=" * 50)
+
+    port.setBaudRate(TARGET_BAUDRATE)
+
+    positions = {}
+    print("\nCurrent servo positions:")
+    print("-" * 50)
+
+    for sid in [5, 6, 7, 8, 9, 10]:
+        _, result, _ = packet.ping(port, sid)
+        if result != 0:
+            print(f"  ID {sid} ({SERVO_NAMES[sid]}): OFFLINE")
+            continue
+
+        pos, result, _ = packet.read2ByteTxRx(port, sid, ADDR_CURRENT_POSITION)
+        if result != 0:
+            print(f"  ID {sid} ({SERVO_NAMES[sid]}): READ FAILED")
+            continue
+
+        # Swap bytes (SDK endianness fix)
+        pos = ((pos & 0xFF) << 8) | ((pos >> 8) & 0xFF)
+        positions[sid] = pos
+        print(f"  ID {sid} ({SERVO_NAMES[sid]}): {pos}")
+
+    print("-" * 50)
+    print("\nCopy this for NEUTRAL_POSITIONS or calibration:")
+    print("{")
+    for sid, pos in positions.items():
+        print(f"    {sid}: {pos},  # {SERVO_NAMES[sid]}")
+    print("}")
+
+    return positions
+
+
+def set_zero_positions(port, packet):
+    """Move all servos to their neutral/zero positions."""
+    print("=" * 50)
+    print("SETTING SERVOS TO NEUTRAL POSITIONS")
+    print("=" * 50)
+
+    port.setBaudRate(TARGET_BAUDRATE)
+
+    # Set speed first (servos need non-zero speed to move)
+    print("\nSetting servo speeds...")
+    for sid in NEUTRAL_POSITIONS.keys():
+        speed = 2000
+        speed_swapped = ((speed & 0xFF) << 8) | ((speed >> 8) & 0xFF)
+        packet.write2ByteTxRx(port, sid, ADDR_GOAL_SPEED, speed_swapped)
+        time.sleep(0.01)
+
+    print("\nMoving to neutral positions:")
+    print("-" * 50)
+
+    for sid, target in NEUTRAL_POSITIONS.items():
+        _, result, _ = packet.ping(port, sid)
+        if result != 0:
+            print(f"  ID {sid} ({SERVO_NAMES[sid]}): OFFLINE - skipped")
+            continue
+
+        # Swap bytes for SDK
+        target_swapped = ((target & 0xFF) << 8) | ((target >> 8) & 0xFF)
+        packet.write2ByteTxRx(port, sid, ADDR_GOAL_POSITION, target_swapped)
+        print(f"  ID {sid} ({SERVO_NAMES[sid]}): -> {target}")
+        time.sleep(0.1)
+
+    print("-" * 50)
+    print("Done! Servos moved to neutral positions.")
+
+
 def test_servo(port, packet, servo_id):
     """Test servo movement."""
     print("=" * 50)
@@ -256,6 +348,8 @@ Examples:
     parser.add_argument("--new-id", "-n", type=int, help="New servo ID (1-253)")
     parser.add_argument("--scan", "-s", action="store_true", help="Scan for all servos")
     parser.add_argument("--test", "-t", type=int, help="Test servo movement by ID")
+    parser.add_argument("--zero", "-z", action="store_true", help="Read current positions as zero/neutral")
+    parser.add_argument("--set-zero", action="store_true", help="Move all servos to neutral positions")
     parser.add_argument("--factory", "-f", action="store_true",
                         help="Only configure factory servos (1Mbps) - ignores already-configured servos")
 
@@ -286,6 +380,12 @@ Examples:
         if args.scan:
             scan_all(port, packet)
 
+        if args.zero:
+            read_zero_positions(port, packet)
+
+        if args.set_zero:
+            set_zero_positions(port, packet)
+
         if args.new_id:
             if not 1 <= args.new_id <= 253:
                 print("Error: ID must be 1-253")
@@ -295,7 +395,7 @@ Examples:
         if args.test:
             test_servo(port, packet, args.test)
 
-        if not args.scan and not args.new_id and not args.test:
+        if not args.scan and not args.new_id and not args.test and not args.zero and not args.set_zero:
             print("No action specified. Use --scan, --new-id, or --test")
             print("Run with --help for usage.")
 

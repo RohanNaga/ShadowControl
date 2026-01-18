@@ -400,14 +400,11 @@ class SDKServoController:
             return None
         # Swap bytes to fix SDK endianness
         pos = _swap_bytes(pos)
-        # Sanity check for 12-bit encoder (0-4095)
-        if pos > 4095:
-            return None
         return pos
 
     def write_position(self, servo_id, position):
-        """Write raw position to servo (0-4095 steps for STS3215)."""
-        position = int(position) & 0x0FFF  # 12-bit range
+        """Write raw position to servo."""
+        position = int(position) & 0xFFFF  # 16-bit range (no clipping)
         # Swap bytes before sending to fix SDK endianness
         position = _swap_bytes(position)
         self.packet_handler.write2ByteTxRx(
@@ -814,7 +811,7 @@ class ServoController:
 
         zero_offset = self.calibration[key]["zero_offset"]
         target_steps = zero_offset + angle_to_steps(angle)
-        target_steps = max(0, min(4095, int(target_steps)))  # 12-bit encoder range
+        target_steps = int(target_steps) & 0xFFFF  # 16-bit wrap (no clipping)
 
         self._ctrl.write_position(servo_id, target_steps)
         self.last_angles[servo_id] = angle
@@ -869,7 +866,7 @@ class ServoController:
 
             zero_offset = self.calibration[key]["zero_offset"]
             target_steps = zero_offset + angle_to_steps(angle)
-            target_steps = max(0, min(4095, int(target_steps)))  # 12-bit encoder range
+            target_steps = int(target_steps) & 0xFFFF  # 16-bit wrap (no clipping)
 
             # addParam takes raw bytes in [low, high] order - no swap needed
             # (unlike write2ByteTxRx which needs swap due to SDK's internal byte order)

@@ -63,23 +63,24 @@ SERVO_MAPPING = {
     # Shoulder2 (Abduction): side-to-side movement in XY plane
     # Elbow: arm bend (0° straight, 90° bent)
     #
-    # 5: {"name": "R_Shoulder1", "pose_key": "right_ext", "scale": 1.0},  # DISABLED
     # PUPPETEER MODE: same side control (your right = robot right)
-    6: {"name": "R_Shoulder2", "pose_key": "right_abd", "scale": -1.0},  # Inverted (right_abd is negative)
+    5: {"name": "R_Shoulder1", "pose_key": "right_ext", "scale": -1.0},
+    6: {"name": "R_Shoulder2", "pose_key": "right_abd", "scale": -1.0},
     7: {"name": "R_Elbow", "pose_key": "right_elbow", "scale": 1.0},
-    # 8: {"name": "L_Shoulder1", "pose_key": "left_ext", "scale": 1.0},  # DISABLED
+    8: {"name": "L_Shoulder1", "pose_key": "left_ext", "scale": 1.0},
     9: {"name": "L_Shoulder2", "pose_key": "left_abd", "scale": 1.0},
     10: {"name": "L_Elbow", "pose_key": "left_elbow", "scale": 1.0},
 }
 
 # Neutral positions from calibration - used for reset (12-bit range: 0-4095)
+# All servos calibrated to middle (2048) for full range in both directions
 NEUTRAL_POSITIONS = {
-    5: 3981,
-    6: 107,
-    7: 188,
-    8: 3482,
-    9: 3272,
-    10: 509,
+    5: 2048,
+    6: 2048,
+    7: 2048,
+    8: 2048,
+    9: 2048,
+    10: 2048,
 }
 
 CALIBRATION_FILE = os.path.join(
@@ -839,14 +840,17 @@ def main():
                 servo_ctrl.load_calibration(CALIBRATION_FILE)
                 # Read current servo positions and use as calibration
                 # This prevents the robot from jumping on startup
-                print("Reading current servo positions for calibration...")
+                logger.info("Reading current servo positions for calibration...")
                 for servo_id in SERVO_MAPPING.keys():
                     pos = servo_ctrl.read_position_raw(servo_id)
+                    config = SERVO_MAPPING[servo_id]
                     if pos is not None:
                         servo_ctrl.calibration[str(servo_id)]["zero_offset"] = pos
-                        print(f"  ID {servo_id}: {pos}")
+                        logger.info(f"  ID {servo_id} ({config['name']}): pos={pos} pose_key={config['pose_key']} scale={config['scale']}")
+                    else:
+                        logger.error(f"  ID {servo_id} ({config['name']}): FAILED TO READ")
                     time.sleep(0.01)
-                print("Servos calibrated from current positions.")
+                logger.info("Servos calibrated from current positions.")
                 # Initialize servo speed (CRITICAL: STS3215 needs non-zero speed to move)
                 servo_ctrl.initialize_servos(list(SERVO_MAPPING.keys()) + [5, 7, 8, 10])
             else:
@@ -874,10 +878,20 @@ def main():
     fps = 0.0
     pose_zero_offsets = None  # Will be set from first valid frame
 
-    print("\n" + "=" * 50)
+    print("\n" + "=" * 60)
     print("Shadow Control - Teleoperation Active")
-    print("=" * 50)
-    print("Controls:")
+    print("=" * 60)
+
+    # Show servo mapping configuration
+    print("\nSERVO MAPPING:")
+    print("-" * 60)
+    print(f"{'ID':<4} {'Name':<14} {'Pose Key':<12} {'Scale':<6}")
+    print("-" * 60)
+    for sid, cfg in SERVO_MAPPING.items():
+        print(f"{sid:<4} {cfg['name']:<14} {cfg['pose_key']:<12} {cfg['scale']:+.1f}")
+    print("-" * 60)
+
+    print("\nControls:")
     print("  ESC   - Quit")
     print("  SPACE - Toggle servo control")
     print("  R     - Reset servos to neutral")
@@ -887,9 +901,9 @@ def main():
         print("  1 - arm_forward    2 - arm_side")
         print("  3 - elbow_bend     4 - both_arms")
         print("  5 - neutral        0 - other")
-    print("=" * 50)
+    print("=" * 60)
     print("\nStand in your NEUTRAL POSE for calibration...")
-    print("=" * 50 + "\n")
+    print("=" * 60 + "\n")
 
     frame_timestamp_ms = 0
     try:
@@ -922,13 +936,27 @@ def main():
                 draw_landmarks(frame, landmarks)
 
                 # Get pose angles
-                pose_angles = get_pose_angles(landmarks)
+                raw_pose_angles = get_pose_angles(landmarks)
+                pose_angles = raw_pose_angles.copy()
+
+                # Debug: log raw pose angles every second
+                if args.debug and frame_timestamp_ms % 1000 < 34:
+                    logger.debug(f"RAW POSE: L_abd={raw_pose_angles.get('left_abd', 0):+6.1f} R_abd={raw_pose_angles.get('right_abd', 0):+6.1f} L_elb={raw_pose_angles.get('left_elbow', 0):+6.1f} R_elb={raw_pose_angles.get('right_elbow', 0):+6.1f}")
+
+                # Warn about gimbal lock (NaN values)
+                nan_keys = [k for k, v in raw_pose_angles.items() if np.isnan(v)]
+                if nan_keys and args.debug:
+                    logger.warning(f"GIMBAL LOCK: {', '.join(nan_keys)}")
 
                 # Calibrate zero from first valid frame
                 if pose_zero_offsets is None:
-                    pose_zero_offsets = pose_angles.copy()
-                    print("CALIBRATED! Zero offsets captured from current pose.")
-                    print(f"  Offsets: {pose_zero_offsets}")
+                    pose_zero_offsets = raw_pose_angles.copy()
+                    logger.info("=" * 50)
+                    logger.info("POSE CALIBRATION - Zero offsets captured:")
+                    for key, val in pose_zero_offsets.items():
+                        if not np.isnan(val):
+                            logger.info(f"  {key}: {val:+.1f}°")
+                    logger.info("=" * 50)
 
                 # Subtract zero offsets (first frame becomes 0, 0, 0)
                 # Negative values = below neutral, positive = above neutral
@@ -936,8 +964,16 @@ def main():
                     if key in pose_zero_offsets and not np.isnan(pose_zero_offsets[key]):
                         pose_angles[key] = pose_angles[key] - pose_zero_offsets[key]
 
+                # Debug: log pose after offset subtraction
+                if args.debug and frame_timestamp_ms % 1000 < 34:
+                    logger.debug(f"AFTER OFFSET: L_abd={pose_angles.get('left_abd', 0):+6.1f} R_abd={pose_angles.get('right_abd', 0):+6.1f} L_elb={pose_angles.get('left_elbow', 0):+6.1f} R_elb={pose_angles.get('right_elbow', 0):+6.1f}")
+
                 # Smooth angles
                 pose_angles = smoother.smooth_dict(pose_angles)
+
+                # Debug: log pose after smoothing
+                if args.debug and frame_timestamp_ms % 1000 < 34:
+                    logger.debug(f"AFTER SMOOTH: L_abd={pose_angles.get('left_abd', 0):+6.1f} R_abd={pose_angles.get('right_abd', 0):+6.1f} L_elb={pose_angles.get('left_elbow', 0):+6.1f} R_elb={pose_angles.get('right_elbow', 0):+6.1f}")
 
                 # Draw angle arcs on joints
                 h, w = frame.shape[:2]
@@ -1009,9 +1045,21 @@ def main():
                     servo_angle = config["scale"] * raw_angle
                     servo_angles[servo_id] = servo_angle
 
+                # Debug: log servo commands every second
+                if args.debug and frame_timestamp_ms % 1000 < 34:
+                    cmd_str = " ".join([f"ID{sid}={ang:+6.1f}" for sid, ang in servo_angles.items()])
+                    logger.debug(f"SERVO CMD: {cmd_str}")
+
                 # Send to servos
                 if servo_ctrl and servo_enabled and servo_angles:
                     servo_ctrl.write_angles(servo_angles)
+
+                    # Debug: log rate limiting if it occurred
+                    if args.debug and frame_timestamp_ms % 1000 < 34:
+                        for sid, target in servo_angles.items():
+                            actual = servo_ctrl.last_angles.get(sid)
+                            if actual is not None and abs(actual - target) > 0.1:
+                                logger.debug(f"RATE LIMITED: ID{sid} target={target:+.1f} actual={actual:+.1f}")
 
                 # Read encoder positions (every 10th frame to reduce bus contention)
                 encoder_angles = {}
@@ -1022,6 +1070,11 @@ def main():
                     encoder_angles = servo_ctrl.read_angles(SERVO_MAPPING.keys())
                     for sid in SERVO_MAPPING.keys():
                         raw_positions[sid] = servo_ctrl.read_position_raw(sid)
+
+                    # Debug: log encoder feedback
+                    if args.debug:
+                        enc_str = " ".join([f"ID{sid}={ang:+6.1f}" for sid, ang in encoder_angles.items() if ang is not None])
+                        logger.debug(f"ENCODER: {enc_str}")
 
                 # Read temperatures less frequently (every ~3 seconds)
                 if servo_ctrl and servo_ctrl.connected and frame_timestamp_ms % 3000 < 34:
@@ -1053,7 +1106,7 @@ def main():
                 break
             elif key == ord(" "):  # SPACE - toggle servo
                 servo_enabled = not servo_enabled
-                print(f"Servo control: {'ENABLED' if servo_enabled else 'DISABLED'}")
+                logger.info(f"Servo control: {'ENABLED' if servo_enabled else 'DISABLED'}")
             elif key == ord("r") or key == ord("R"):  # R - reset to neutral positions
                 if servo_ctrl:
                     print("Resetting servos to neutral positions...")

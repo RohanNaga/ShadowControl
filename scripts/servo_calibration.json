@@ -1,26 +1,26 @@
 {
   "5": {
-    "zero_offset": 3981,
+    "zero_offset": 2048,
     "name": "R_Shoulder1"
   },
   "6": {
-    "zero_offset": 107,
+    "zero_offset": 2048,
     "name": "R_Shoulder2"
   },
   "7": {
-    "zero_offset": 186,
+    "zero_offset": 2048,
     "name": "R_Elbow"
   },
   "8": {
-    "zero_offset": 3482,
+    "zero_offset": 2048,
     "name": "L_Shoulder1"
   },
   "9": {
-    "zero_offset": 3272,
+    "zero_offset": 2048,
     "name": "L_Shoulder2"
   },
   "10": {
-    "zero_offset": 458,
+    "zero_offset": 2048,
     "name": "L_Elbow"
   }
 }
