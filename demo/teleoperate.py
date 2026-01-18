@@ -57,16 +57,17 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 #   Elbow Flexion      -> Servo 7/10 (Elbow)    - arm bend
 
 SERVO_MAPPING = {
-    # Scale: 1.0 = same direction as MediaPipe
+    # Scale: 1.0 = same direction as MediaPipe, -1.0 = inverted
     #
     # Shoulder1 (Extension): forward/back movement in YZ plane
     # Shoulder2 (Abduction): side-to-side movement in XY plane
     # Elbow: arm bend (0° straight, 90° bent)
     #
     # PUPPETEER MODE: same side control (your right = robot right)
+    # Right side servos are inverted to match robot's coordinate system
     5: {"name": "R_Shoulder1", "pose_key": "right_ext", "scale": -1.0},
     6: {"name": "R_Shoulder2", "pose_key": "right_abd", "scale": -1.0},
-    7: {"name": "R_Elbow", "pose_key": "right_elbow", "scale": 1.0},
+    7: {"name": "R_Elbow", "pose_key": "right_elbow", "scale": -1.0},  # Inverted to match right shoulders
     8: {"name": "L_Shoulder1", "pose_key": "left_ext", "scale": 1.0},
     9: {"name": "L_Shoulder2", "pose_key": "left_abd", "scale": 1.0},
     10: {"name": "L_Elbow", "pose_key": "left_elbow", "scale": 1.0},
@@ -145,13 +146,87 @@ def angle_between(v1, v2):
 
 def elbow_flexion(shoulder, elbow, wrist):
     """
-    Calculate elbow flexion angle.
-    Returns 0° for straight arm, increases as elbow bends.
-    (Inverted from raw angle_between which gives 180° for straight)
+    Calculate elbow flexion angle using plane projection for improved accuracy.
+    Returns 0° for straight arm, increases as elbow bends (0-180° range).
+    
+    Method: Projects vectors onto plane perpendicular to upper arm axis.
+    This removes the effect of shoulder roll/rotation, giving pure flexion angle.
+    Similar structure to shoulder_abduction and shoulder_extension for consistency.
+    
+    Coordinate System:
+    - Upper arm vector: shoulder → elbow
+    - Forearm vector: elbow → wrist
+    - Projects to plane perpendicular to upper arm axis (similar to shoulder_roll)
+    - Measures angle between upper arm direction and forearm in that plane
+    - This gives flexion angle independent of shoulder roll component
+    
+    GIMBAL LOCK: When forearm is nearly parallel to upper arm, the projection
+    becomes very small and the angle becomes unreliable. We handle edge cases.
     """
-    raw_angle = angle_between(shoulder - elbow, wrist - elbow)
-    # Invert: straight arm (180°) -> 0°, bent arm (90°) -> 90°
-    return 180.0 - raw_angle if not np.isnan(raw_angle) else raw_angle
+    upper_arm = elbow - shoulder  # Vector from shoulder to elbow
+    forearm = wrist - elbow       # Vector from elbow to wrist
+    
+    # Keep full vectors for comparison
+    upper_arm_full = upper_arm.copy()
+    forearm_full = forearm.copy()
+    
+    # Get full vector lengths for comparison
+    upper_arm_full_norm = np.linalg.norm(upper_arm_full)
+    forearm_full_norm = np.linalg.norm(forearm_full)
+    if upper_arm_full_norm < 1e-6 or forearm_full_norm < 1e-6:
+        return float("nan")
+    
+    # Normalize vectors
+    upper_arm_unit = upper_arm / upper_arm_full_norm
+    forearm_unit = forearm / forearm_full_norm
+    
+    # Project forearm onto plane perpendicular to upper arm axis
+    # Remove component parallel to upper arm (this removes roll component)
+    forearm_perp = forearm_unit - np.dot(forearm_unit, upper_arm_unit) * upper_arm_unit
+    
+    # Check if projected forearm vector is valid
+    forearm_perp_norm = np.linalg.norm(forearm_perp)
+    
+    # GIMBAL LOCK FIX: If the perpendicular projection is less than 30% of the full forearm length,
+    # the forearm is mostly parallel to the upper arm and the angle is unreliable
+    projection_ratio = forearm_perp_norm / forearm_full_norm if forearm_full_norm > 1e-6 else 0.0
+    if projection_ratio < 0.3:
+        # Forearm is nearly parallel to upper arm - check if extended or bent
+        dot_parallel = np.dot(forearm_unit, upper_arm_unit)
+        if dot_parallel > 0.9:
+            return 0.0  # Fully extended (same direction)
+        elif dot_parallel < -0.9:
+            return 180.0  # Fully bent (opposite direction)
+        else:
+            return float("nan")  # Angle is unreliable in gimbal lock region
+    
+    # Reference direction: upper arm direction (reversed, from elbow back to shoulder)
+    # This is the direction we measure flexion relative to
+    upper_arm_reversed = -upper_arm_unit
+    
+    # Project the reversed upper arm onto the perpendicular plane
+    # (should already be in plane since it's opposite to upper_arm_unit)
+    upper_arm_rev_perp = upper_arm_reversed - np.dot(upper_arm_reversed, upper_arm_unit) * upper_arm_unit
+    upper_arm_rev_perp_norm = np.linalg.norm(upper_arm_rev_perp)
+    
+    if upper_arm_rev_perp_norm < 1e-6:
+        # Edge case: shouldn't happen normally
+        return float("nan")
+    
+    # Normalize perpendicular components
+    forearm_perp = forearm_perp / forearm_perp_norm
+    upper_arm_rev_perp = upper_arm_rev_perp / upper_arm_rev_perp_norm
+    
+    # Calculate angle from upper arm direction (reversed) to forearm direction
+    # This gives us the flexion angle: 0° when straight, 180° when fully bent
+    dot = np.clip(np.dot(upper_arm_rev_perp, forearm_perp), -1.0, 1.0)
+    angle = np.degrees(np.arccos(dot))
+    
+    # The angle gives us flexion:
+    # - 0° = vectors aligned (straight arm) -> 0° flexion
+    # - 90° = vectors perpendicular -> 90° flexion
+    # - 180° = vectors opposite (fully bent) -> 180° flexion
+    return min(180.0, max(0.0, angle))
 
 
 def shoulder_roll(shoulder, elbow, wrist):
@@ -447,15 +522,15 @@ def draw_landmarks(frame, landmarks):
             start = landmarks[start_idx]
             end = landmarks[end_idx]
             if start.visibility > 0.5 and end.visibility > 0.5:
-                start_point = (int(start.x * w), int(start.y * h))
-                end_point = (int(end.x * w), int(end.y * h))
-                cv2.line(frame, start_point, end_point, (0, 255, 0), 2)
+            start_point = (int(start.x * w), int(start.y * h))
+            end_point = (int(end.x * w), int(end.y * h))
+            cv2.line(frame, start_point, end_point, (0, 255, 0), 2)
 
     # Draw landmarks
     for i, lm in enumerate(landmarks):
         if lm.visibility > 0.5:
-            x, y = int(lm.x * w), int(lm.y * h)
-            cv2.circle(frame, (x, y), 5, (0, 0, 255), -1)
+        x, y = int(lm.x * w), int(lm.y * h)
+        cv2.circle(frame, (x, y), 5, (0, 0, 255), -1)
 
 
 # ============================================================================
@@ -1049,6 +1124,13 @@ def main():
                 if args.debug and frame_timestamp_ms % 1000 < 34:
                     cmd_str = " ".join([f"ID{sid}={ang:+6.1f}" for sid, ang in servo_angles.items()])
                     logger.debug(f"SERVO CMD: {cmd_str}")
+                    # Specifically log elbow angles for debugging
+                    logger.debug(f"ELBOW DEBUG: L_elbow_raw={raw_pose_angles.get('left_elbow', 0):+6.1f}° "
+                               f"L_elbow_cal={pose_angles.get('left_elbow', 0):+6.1f}° "
+                               f"L_servo={servo_angles.get(10, 0):+6.1f}° | "
+                               f"R_elbow_raw={raw_pose_angles.get('right_elbow', 0):+6.1f}° "
+                               f"R_elbow_cal={pose_angles.get('right_elbow', 0):+6.1f}° "
+                               f"R_servo={servo_angles.get(7, 0):+6.1f}°")
 
                 # Send to servos
                 if servo_ctrl and servo_enabled and servo_angles:
