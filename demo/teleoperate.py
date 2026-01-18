@@ -67,7 +67,7 @@ SERVO_MAPPING = {
     # Right side servos are inverted to match robot's coordinate system
     5: {"name": "R_Shoulder1", "pose_key": "right_ext", "scale": -1.0},
     6: {"name": "R_Shoulder2", "pose_key": "right_abd", "scale": -1.0},
-    7: {"name": "R_Elbow", "pose_key": "right_elbow", "scale": -1.0},  # Inverted to match right shoulders
+    7: {"name": "R_Elbow", "pose_key": "right_elbow", "scale": 1.0},  # changed back to be 1.0 scale
     8: {"name": "L_Shoulder1", "pose_key": "left_ext", "scale": 1.0},
     9: {"name": "L_Shoulder2", "pose_key": "left_abd", "scale": 1.0},
     10: {"name": "L_Elbow", "pose_key": "left_elbow", "scale": 1.0},
