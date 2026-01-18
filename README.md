@@ -467,41 +467,50 @@ python scripts/test_vision.py
 
 Configure each servo with a unique ID using `scripts/configure_servo.py`.
 
+**Total: 16 servos** (6 arms + 10 legs)
+
+### Arm Motor Naming Convention
+
+Each arm has 3 motors:
+- **Shoulder1** = Extension (forward/back movement)
+- **Shoulder2** = Abduction (side-to-side movement)
+- **Elbow** = Flexion (arm bend)
+
 ### Right Arm (IDs 5-7)
 
-| Joint | Servo ID | Configured | Notes |
-|-------|----------|------------|-------|
-| Right Shoulder | 5 | ✓ | |
-| Right Elbow | 6 | ✓ | |
-| Right Wrist | 7 | ✓ | |
+| Joint | Servo ID | Movement | Configured |
+|-------|----------|----------|------------|
+| R_Shoulder1 | 5 | Extension (forward/back) | ✓ |
+| R_Shoulder2 | 6 | Abduction (side) | ✓ |
+| R_Elbow | 7 | Flexion (bend) | ✓ |
 
 ### Left Arm (IDs 8-10)
 
-| Joint | Servo ID | Configured | Notes |
-|-------|----------|------------|-------|
-| Left Shoulder | 8 | ✓ | |
-| Left Elbow | 9 | ✓ | |
-| Left Wrist | 10 | | |
+| Joint | Servo ID | Movement | Configured |
+|-------|----------|----------|------------|
+| L_Shoulder1 | 8 | Extension (forward/back) | ✓ |
+| L_Shoulder2 | 9 | Abduction (side) | ✓ |
+| L_Elbow | 10 | Flexion (bend) | ✓ |
 
-### Right Leg (IDs 11-15)
+### Right Leg (IDs 13-17)
 
-| Joint | Servo ID | Configured | Notes |
-|-------|----------|------------|-------|
-| Right Hip | 11 | | |
-| Right Thigh | 12 | | |
-| Right Knee | 13 | | |
-| Right Shin | 14 | | |
-| Right Ankle | 15 | | |
+| Joint | Servo ID | Configured |
+|-------|----------|------------|
+| Right Hip | 13 | ✓ |
+| Right Thigh | 14 | ✓ |
+| Right Knee | 15 | ✓ |
+| Right Shin | 16 | ✓ |
+| Right Ankle | 17 | ✓ |
 
-### Left Leg (IDs 16-20)
+### Left Leg (IDs 18-22)
 
-| Joint | Servo ID | Configured | Notes |
-|-------|----------|------------|-------|
-| Left Hip | 16 | | |
-| Left Thigh | 17 | | |
-| Left Knee | 18 | | |
-| Left Shin | 19 | | |
-| Left Ankle | 20 | | |
+| Joint | Servo ID | Configured |
+|-------|----------|------------|
+| Left Hip | 18 | ✓ |
+| Left Thigh | 19 | ✓ |
+| Left Knee | 20 | ✓ |
+| Left Shin | 21 | ✓ |
+| Left Ankle | 22 | ✓ |
 
 ### Configuration Commands
 
@@ -520,24 +529,31 @@ python3 scripts/configure_servo.py --scan
 
 ## Servo Mapping (Keypoints)
 
+### Arm Servos
+
+| Servo ID | Joint | Pose Angle | Description |
+|----------|-------|------------|-------------|
+| 5 | R_Shoulder1 | right_ext | Shoulder extension (forward/back in YZ plane) |
+| 6 | R_Shoulder2 | right_abd | Shoulder abduction (side in XY plane) |
+| 7 | R_Elbow | right_elbow | Elbow flexion (arm bend) |
+| 8 | L_Shoulder1 | left_ext | Shoulder extension (forward/back in YZ plane) |
+| 9 | L_Shoulder2 | left_abd | Shoulder abduction (side in XY plane) |
+| 10 | L_Elbow | left_elbow | Elbow flexion (arm bend) |
+
+### Leg Servos
+
 | Servo ID | Joint | Keypoint Pair | Notes |
 |----------|-------|---------------|-------|
-| 5 | Right Shoulder | 6→8 | right_shoulder to right_elbow |
-| 6 | Right Elbow | 6→8→10 | shoulder-elbow-wrist angle |
-| 7 | Right Wrist | 8→10 | |
-| 8 | Left Shoulder | 5→7 | left_shoulder to left_elbow |
-| 9 | Left Elbow | 5→7→9 | shoulder-elbow-wrist angle |
-| 10 | Left Wrist | 7→9 | |
-| 11 | Right Hip | 12→14 | right_hip to right_knee |
-| 12 | Right Thigh | 12→14 | |
-| 13 | Right Knee | 12→14→16 | hip-knee-ankle angle |
-| 14 | Right Shin | 14→16 | |
-| 15 | Right Ankle | 14→16 | |
-| 16 | Left Hip | 11→13 | left_hip to left_knee |
-| 17 | Left Thigh | 11→13 | |
-| 18 | Left Knee | 11→13→15 | hip-knee-ankle angle |
-| 19 | Left Shin | 13→15 | |
-| 20 | Left Ankle | 13→15 | |
+| 13 | Right Hip | 12→14 | right_hip to right_knee |
+| 14 | Right Thigh | 12→14 | |
+| 15 | Right Knee | 12→14→16 | hip-knee-ankle angle |
+| 16 | Right Shin | 14→16 | |
+| 17 | Right Ankle | 14→16 | |
+| 18 | Left Hip | 11→13 | left_hip to left_knee |
+| 19 | Left Thigh | 11→13 | |
+| 20 | Left Knee | 11→13→15 | hip-knee-ankle angle |
+| 21 | Left Shin | 13→15 | |
+| 22 | Left Ankle | 13→15 | |
 
 ---
 
