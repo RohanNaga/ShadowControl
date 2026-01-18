@@ -24,43 +24,43 @@
     "name": "L_Elbow"
   },
   "13": {
-    "zero_offset": 3450,
+    "zero_offset": 90,
     "name": "R_Hip"
   },
   "14": {
-    "zero_offset": 3340,
+    "zero_offset": 3338,
     "name": "R_Thigh"
   },
   "15": {
-    "zero_offset": 243,
+    "zero_offset": 241,
     "name": "R_Knee"
   },
   "16": {
-    "zero_offset": 1320,
+    "zero_offset": 207,
     "name": "R_Shin"
   },
   "17": {
-    "zero_offset": 310,
+    "zero_offset": 3888,
     "name": "R_Ankle"
   },
   "18": {
-    "zero_offset": 476,
+    "zero_offset": 3851,
     "name": "L_Hip"
   },
   "19": {
-    "zero_offset": 370,
+    "zero_offset": 384,
     "name": "L_Thigh"
   },
   "20": {
-    "zero_offset": 3894,
+    "zero_offset": 3893,
     "name": "L_Knee"
   },
   "21": {
-    "zero_offset": 3510,
+    "zero_offset": 466,
     "name": "L_Shin"
   },
   "22": {
-    "zero_offset": 3811,
+    "zero_offset": 144,
     "name": "L_Ankle"
   }
 }

@@ -13,6 +13,10 @@ Usage:
     # Move all calibrated servos to angle
     python servo_control.py --all --angle 0
 
+    # Move multiple servos to different angles simultaneously
+    python servo_control.py --angles "13:10,14:-5,15:20"
+    python servo_control.py --angles "R_Hip:10,R_Knee:-15"  # Use names from calibration
+
     # Show current angles
     python servo_control.py --status
 """
@@ -105,6 +109,81 @@ def move_to_angle(ctrl, servo_ids, angle):
     print("Done.")
 
 
+def move_to_angles(ctrl, angles_dict):
+    """
+    Move multiple servos to different angles simultaneously.
+    
+    Args:
+        ctrl: ServoController instance
+        angles_dict: Dict mapping servo_id -> angle (e.g., {13: 10.0, 14: -5.0})
+    """
+    cal = load_calibration()
+    
+    # Build name-to-id mapping for convenience
+    name_to_id = {}
+    for sid_str, data in cal.items():
+        name = data.get("name", "")
+        if name:
+            name_to_id[name.lower()] = int(sid_str)
+    
+    print(f"Moving {len(angles_dict)} servos to different angles...")
+    
+    for servo_ref, angle in angles_dict.items():
+        # Resolve servo reference (could be ID or name)
+        if isinstance(servo_ref, int):
+            sid = servo_ref
+        elif servo_ref.isdigit():
+            sid = int(servo_ref)
+        elif servo_ref.lower() in name_to_id:
+            sid = name_to_id[servo_ref.lower()]
+        else:
+            print(f"  {servo_ref}: UNKNOWN (not found in calibration)")
+            continue
+        
+        key = str(sid)
+        if key not in cal:
+            print(f"  ID {sid}: NOT CALIBRATED (run --calibrate first)")
+            continue
+        
+        zero_offset = cal[key]["zero_offset"]
+        name = cal[key].get("name", f"servo_{sid}")
+        target_steps = zero_offset + angle_to_steps(angle)
+        
+        ctrl.write_position_raw(sid, target_steps)
+        print(f"  ID {sid} ({name}): {angle}° → raw {target_steps}")
+    
+    time.sleep(0.5)
+    print("Done.")
+
+
+def parse_angles_string(angles_str):
+    """
+    Parse angles string like "13:10,14:-5,15:20" or "R_Hip:10,R_Knee:-15".
+    
+    Returns:
+        dict: {servo_ref: angle} where servo_ref is ID (str) or name (str)
+    """
+    angles_dict = {}
+    
+    for pair in angles_str.split(","):
+        pair = pair.strip()
+        if ":" not in pair:
+            print(f"Warning: Invalid format '{pair}', expected 'id:angle' or 'name:angle'")
+            continue
+        
+        parts = pair.split(":", 1)
+        servo_ref = parts[0].strip()
+        try:
+            angle = float(parts[1].strip())
+        except ValueError:
+            print(f"Warning: Invalid angle in '{pair}'")
+            continue
+        
+        angles_dict[servo_ref] = angle
+    
+    return angles_dict
+
+
 def show_status(ctrl, servo_ids):
     """Show current angle of each servo."""
     cal = load_calibration()
@@ -147,7 +226,9 @@ def main():
     parser.add_argument("--id", "-i", type=str, help="Servo ID(s): 5 or 5,6,7 or 5-10")
     parser.add_argument("--all", "-a", action="store_true", help="All calibrated servos")
     parser.add_argument("--calibrate", "-c", action="store_true", help="Save current positions as zero")
-    parser.add_argument("--angle", type=float, help="Target angle in degrees")
+    parser.add_argument("--angle", type=float, help="Target angle in degrees (same for all servos)")
+    parser.add_argument("--angles", type=str, 
+                        help="Multiple servo:angle pairs, e.g. '13:10,14:-5,15:20' or 'R_Hip:10,R_Knee:-15'")
     parser.add_argument("--status", "-s", action="store_true", help="Show current status")
 
     args = parser.parse_args()
@@ -192,6 +273,14 @@ def main():
         # Execute command
         if args.calibrate:
             calibrate(ctrl, servo_ids)
+        elif args.angles is not None:
+            # Move multiple servos to different angles
+            angles_dict = parse_angles_string(args.angles)
+            if angles_dict:
+                move_to_angles(ctrl, angles_dict)
+            else:
+                print("Error: No valid servo:angle pairs found")
+                sys.exit(1)
         elif args.angle is not None:
             move_to_angle(ctrl, servo_ids, args.angle)
         elif args.status:
