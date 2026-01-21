@@ -17,7 +17,7 @@ Shadow Control enables real-time control of a K-Scale Zeroth-01 humanoid robot b
 - **Live Tracking Mode**: Real-time pose detection and robot control
 - **Video Playback Mode**: Execute pre-recorded movement sequences
 - **Single-Board Architecture**: Everything runs on Milk-V Duo S (no external laptop)
-- **Low Latency**: ~90ms end-to-end (camera to robot motion)
+- **Low Latency**: ~130ms end-to-end (camera to robot motion)
 
 ### Tech Stack
 
@@ -25,7 +25,7 @@ Shadow Control enables real-time control of a K-Scale Zeroth-01 humanoid robot b
 |-----------|------------|
 | Controller | Milk-V Duo S (512MB RAM, 0.5 TOPS TPU) |
 | Robot | K-Scale Zeroth-01 (16 servos) |
-| Pose Detection | YOLOv8n-pose converted to cvimodel |
+| Pose Detection | MediaPipe BlazePose (33 landmarks) |
 | Servo Control | kos_zbot (K-Scale's robot OS) |
 | Camera | CAM-GC2083 (2MP, MIPI CSI) |
 | Servos | Feetech STS3215 (19kg.cm, 12-bit encoder) |
@@ -99,7 +99,7 @@ ShadowControl/
 │  ┌───────────────┐     ┌─────────────────────────────────────┐ │
 │  │ GC2083 Camera │────▶│         TDL SDK + TPU              │ │
 │  │ (2MP MIPI)    │     │  ┌─────────────────────────────┐   │ │
-│  │               │     │  │  YOLOv8 Pose Detection      │   │ │
+│  │               │     │  │  MediaPipe BlazePose        │   │ │
 │  └───────────────┘     │  │  (17 keypoints @ 640x640)   │   │ │
 │                        │  └──────────────┬──────────────┘   │ │
 │                        │                 │                   │ │
@@ -299,11 +299,11 @@ STEP 1: CAMERA INPUT
          ▼
 STEP 2: POSE DETECTION (TPU)
 ┌─────────────────────────────────┐
-│ YOLOv8n-pose (converted)        │  → Runs on 0.5 TOPS TPU
-│ 640×640 input, INT8 quantized   │  → ~45ms inference (~20 FPS)
+│ MediaPipe BlazePose             │  → Runs on laptop
+│ 33 landmarks, heavy model       │  → ~30ms inference
 └────────┬────────────────────────┘
-         │ 17 keypoints (x, y, confidence)
-         │ [nose, eyes, ears, shoulders, elbows, wrists, hips, knees, ankles]
+         │ 33 landmarks (x, y, z, visibility)
+         │ [full body pose including hands and face]
          ▼
 STEP 3: JOINT ANGLE CALCULATION (CPU)
 ┌─────────────────────────────────┐
@@ -326,7 +326,7 @@ STEP 5: ROBOT MOTION
 ┌─────────────────────────────────┐
 │ 16x STS3215 Servos              │  → Robot mimics human pose
 │ (reconfigured to 500kbps)       │  → Real-time boxing movements
-│ Zeroth-01 Humanoid              │  → <100ms end-to-end latency
+│ Zeroth-01 Humanoid              │  → ~130ms end-to-end latency
 └─────────────────────────────────┘
 ```
 
@@ -335,10 +335,11 @@ STEP 5: ROBOT MOTION
 | Stage | Time |
 |-------|------|
 | Camera capture | ~33ms (30fps) |
-| Pose inference | ~45ms |
-| Angle calculation | ~2ms |
-| Servo communication | ~10ms |
-| **Total end-to-end** | **~90ms** |
+| Pose estimation | ~30ms (MediaPipe BlazePose) |
+| Angle calculation | ~12ms |
+| Servo communication | ~5ms |
+| Servo response | ~50ms (mechanical) |
+| **Total end-to-end** | **~130ms** |
 
 ---
 
@@ -559,7 +560,7 @@ python3 scripts/configure_servo.py --scan
 
 ## Keypoint Reference
 
-YOLOv8-pose outputs 17 COCO keypoints:
+MediaPipe BlazePose outputs 33 landmarks. Key upper body landmarks used:
 
 ```
 Index  Name            Index  Name
@@ -603,7 +604,7 @@ def shoulder_angle(shoulder, elbow):
 | Metric | Target | Achieved |
 |--------|--------|----------|
 | Pose Detection FPS | >10 | ~22 FPS |
-| End-to-End Latency | <100ms | ~90ms |
+| End-to-End Latency | <150ms | ~130ms |
 | Servo Update Rate | >30Hz | TBD |
 
 ---
@@ -746,4 +747,4 @@ MIT License - See LICENSE file
 
 ## Team
 
-**Shadow Control** - CMU Build18 Hackathon 2026
+**Shadow Control** - CMU Build18 Hackathon 2025

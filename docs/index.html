@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ShadowControl: Vision-Based Humanoid Robot Teleoperation</title>
+    <meta name="description" content="A vision-based teleoperation system for humanoid robots with around 130ms end-to-end latency.">
+    <meta property="og:title" content="ShadowControl">
+    <meta property="og:description" content="Vision-based humanoid robot teleoperation. CMU Build18 2025.">
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;700&family=Noto+Serif:wght@400;700&display=swap" rel="stylesheet">
+
+
+    <style>
+        * { box-sizing: border-box; }
+
+        body {
+            font-family: 'Noto Sans', sans-serif;
+            font-size: 16px;
+            line-height: 1.6;
+            color: #333;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        h1, h2, h3 {
+            font-family: 'Noto Serif', serif;
+            font-weight: 700;
+        }
+
+        h1 {
+            font-size: 2rem;
+            text-align: center;
+            margin-bottom: 0.5rem;
+        }
+
+        h2 {
+            font-size: 1.4rem;
+            margin-top: 2.5rem;
+            margin-bottom: 1rem;
+            padding-bottom: 0.3rem;
+            border-bottom: 1px solid #ddd;
+        }
+
+        h3 {
+            font-size: 1.1rem;
+            margin-top: 1.5rem;
+            margin-bottom: 0.5rem;
+        }
+
+        p { margin: 0 0 1rem; }
+
+        a { color: #4a6ee0; }
+
+        .venue {
+            text-align: center;
+            color: #666;
+            margin-bottom: 1rem;
+        }
+
+        .authors {
+            text-align: center;
+            margin-bottom: 0.3rem;
+        }
+
+        .authors a, .authors span {
+            margin: 0 0.5rem;
+        }
+
+        .affiliation {
+            text-align: center;
+            color: #666;
+            font-size: 0.95rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .links {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        .links a {
+            display: inline-block;
+            margin: 0 0.5rem;
+            padding: 0.5rem 1rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            color: #333;
+            text-decoration: none;
+            font-size: 0.9rem;
+        }
+
+        .links a:hover {
+            background: #f5f5f5;
+        }
+
+        /* Hero section with video and summary side by side */
+        .hero-content {
+            display: flex;
+            gap: 30px;
+            align-items: flex-start;
+            margin-bottom: 2rem;
+        }
+
+        .hero-video {
+            flex: 0 0 300px;
+            border-radius: 6px;
+            overflow: hidden;
+        }
+
+        .hero-video video {
+            width: 100%;
+            display: block;
+        }
+
+        .hero-text {
+            flex: 1;
+        }
+
+        .hero-text p {
+            margin-bottom: 1.5rem;
+        }
+
+        .stats {
+            display: flex;
+            gap: 2rem;
+        }
+
+        .stats .item span:first-child {
+            display: block;
+            font-size: 1.4rem;
+            font-weight: 700;
+            color: #4a6ee0;
+        }
+
+        .stats .item span:last-child {
+            font-size: 0.8rem;
+            color: #666;
+            text-transform: uppercase;
+        }
+
+        @media (max-width: 650px) {
+            .hero-content {
+                flex-direction: column;
+            }
+            .hero-video {
+                flex: none;
+                width: 100%;
+                max-width: 350px;
+                margin: 0 auto;
+            }
+            .stats {
+                justify-content: center;
+            }
+        }
+
+        /* Pipeline diagram */
+        .pipeline {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+            margin: 1.5rem 0;
+            font-size: 0.9rem;
+        }
+
+        .pipeline .stage {
+            padding: 0.5rem 1rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            text-align: center;
+        }
+
+        .pipeline .stage .time {
+            display: block;
+            font-size: 0.75rem;
+            color: #666;
+        }
+
+        .pipeline .arrow {
+            color: #999;
+        }
+
+        /* Code blocks */
+        pre {
+            background: #f5f5f5;
+            padding: 1rem;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-size: 0.85rem;
+            line-height: 1.4;
+        }
+
+        code {
+            font-family: 'SF Mono', Monaco, monospace;
+        }
+
+        /* Tables */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1rem 0;
+            font-size: 0.9rem;
+        }
+
+        th, td {
+            padding: 0.5rem;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+
+        th {
+            font-weight: 600;
+        }
+
+        /* Images */
+        figure {
+            margin: 1.5rem 0;
+        }
+
+        figure img {
+            width: 100%;
+            border-radius: 4px;
+        }
+
+        figcaption {
+            font-size: 0.85rem;
+            color: #666;
+            margin-top: 0.5rem;
+            text-align: center;
+        }
+
+        /* Gallery */
+        .gallery {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 1rem;
+            margin: 1.5rem 0;
+        }
+
+        .gallery img {
+            width: 100%;
+            border-radius: 4px;
+        }
+
+        .gallery figcaption {
+            text-align: left;
+        }
+
+        /* Video */
+        .video-container {
+            margin: 1.5rem 0;
+        }
+
+        .video-container video {
+            width: 100%;
+            max-width: 600px;
+            display: block;
+            margin: 0 auto;
+            border-radius: 4px;
+        }
+
+        /* Team photo */
+        .team-photo {
+            max-width: 600px;
+            margin: 1.5rem auto;
+        }
+
+        .team-photo img {
+            width: 100%;
+            border-radius: 4px;
+        }
+
+        /* Footer */
+        footer {
+            margin-top: 3rem;
+            padding-top: 1.5rem;
+            border-top: 1px solid #ddd;
+            text-align: center;
+            font-size: 0.9rem;
+            color: #666;
+        }
+
+        footer a {
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+
+<h1>ShadowControl</h1>
+<p style="text-align: center; font-size: 1.2rem; color: #555; margin-bottom: 1rem;">Vision-Based Humanoid Robot Teleoperation</p>
+<p class="venue">CMU Build18 2025</p>
+
+<div class="authors">
+    <a href="https://www.linkedin.com/in/rohan-nagabhirava/">Rohan Nagabhirava</a>
+    <a href="https://www.linkedin.com/in/abhishek-hemlani/">Abhishek Hemlani</a>
+    <a href="https://www.linkedin.com/in/ganesh-selvakumar-3a6036266/">Ganesh Selvakumar</a>
+    <a href="https://www.linkedin.com/in/madhavan-iyengar/">Madhavan Iyengar</a>
+    <a href="https://www.linkedin.com/in/revanth-senthilkumaran/">Revanth Senthilkumaran</a>
+</div>
+<p class="affiliation">Carnegie Mellon University</p>
+
+<div class="links">
+    <a href="https://github.com/RohanNaga/ShadowControl">
+        <svg height="16" viewBox="0 0 16 16" width="16" style="vertical-align: middle; margin-right: 6px;">
+            <path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+        </svg>
+        Code
+    </a>
+</div>
+
+<div class="hero-content">
+    <div class="hero-video">
+        <video autoplay muted loop playsinline>
+            <source src="videos/hero.mp4" type="video/mp4">
+        </video>
+    </div>
+    <div class="hero-text">
+        <p>
+            ShadowControl lets you control a humanoid robot by moving your body in front of a camera. Inspired by the puppeteer concept from Real Steel, the system tracks your pose and maps it to robot joint angles in real time.
+        </p>
+        <div class="stats">
+            <div class="item">
+                <span>~130ms</span>
+                <span>Latency</span>
+            </div>
+            <div class="item">
+                <span>22 FPS</span>
+                <span>Control Rate</span>
+            </div>
+            <div class="item">
+                <span>1 Week</span>
+                <span>Build Time</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<h2>Abstract</h2>
+<p>
+    We built a real-time teleoperation system that lets an operator control a humanoid robot through body movements. The system uses MediaPipe to estimate the operator's pose from a webcam, calculates joint angles using plane projection methods, and sends commands to the robot's servos. The main challenges were handling gimbal lock in the angle calculations and achieving smooth motion despite sensor noise. We built everything from scratch in one week at CMU's Build18 hackathon, 3D printing our own parts and assembling all the hardware ourselves for around $610.
+</p>
+
+<h2>Method</h2>
+
+<p>The system has three main stages: pose estimation, joint angle retargeting, and motion control.</p>
+
+<div class="pipeline">
+    <div class="stage">Camera<span class="time">30 FPS</span></div>
+    <span class="arrow">→</span>
+    <div class="stage">Pose Est.<span class="time">~30ms</span></div>
+    <span class="arrow">→</span>
+    <div class="stage">Retarget<span class="time">~12ms</span></div>
+    <span class="arrow">→</span>
+    <div class="stage">Comm<span class="time">~5ms</span></div>
+    <span class="arrow">→</span>
+    <div class="stage">Servo<span class="time">~50ms</span></div>
+</div>
+
+<h3>Pose Estimation</h3>
+<p>
+    We use MediaPipe's BlazePose to extract 33 body landmarks from each video frame. We run the "heavy" model rather than "lite" because it gives more stable 3D positions, which matters more than raw speed for teleoperation. We set high confidence thresholds (0.9) to filter out unreliable detections.
+</p>
+
+<h3>Joint Angle Retargeting</h3>
+<p>
+    The main challenge is converting 3D pose coordinates into robot joint angles. We compute angles by projecting limb vectors onto anatomically meaningful planes. For example, shoulder abduction (raising arm sideways) is computed by projecting the upper arm onto the horizontal plane and measuring the angle from vertical.
+</p>
+<p>
+    A key problem is gimbal lock: when the arm points along a projection axis, the computed angle becomes unstable. We detect this by checking if the projection magnitude falls below 30% of the full vector length. When that happens, we return NaN and hold the previous angle instead of sending jittery commands.
+</p>
+
+<pre>
+def compute_shoulder_abduction(shoulder, elbow):
+    arm_vec = normalize(elbow - shoulder)
+
+    # Project onto XY plane (horizontal)
+    proj_xy = [arm_vec.x, arm_vec.y, 0]
+
+    # Gimbal lock check
+    if magnitude(proj_xy) < 0.3 * magnitude(arm_vec):
+        return NaN
+
+    return atan2(proj_xy.x, proj_xy.y)
+</pre>
+
+<h3>Motion Control</h3>
+<p>
+    Raw retargeted angles are noisy, so we apply three techniques:
+</p>
+<ul>
+    <li><strong>Exponential smoothing</strong> with alpha=0.4 to filter high-frequency noise</li>
+    <li><strong>Rate limiting</strong> at 30 degrees per frame to prevent mechanical shock</li>
+    <li><strong>Dead zone</strong> of 2 degrees to eliminate servo hunting from small noise</li>
+</ul>
+<p>
+    On startup, we read the robot's current positions and use them as the baseline, so the robot does not jump to some default position when teleoperation begins.
+</p>
+
+<h2 id="video">Demo</h2>
+<div class="video-container">
+    <video controls playsinline>
+        <source src="videos/demo_day.mp4" type="video/mp4">
+    </video>
+</div>
+<p style="text-align: center; font-size: 0.9rem; color: #666;">Demo at Build18 expo.</p>
+
+<h2>Results</h2>
+
+<h3>Latency</h3>
+<p>
+    End-to-end latency from human movement to robot movement is around 130ms. The breakdown:
+</p>
+<table>
+    <tr><th>Stage</th><th>Time</th><th>Notes</th></tr>
+    <tr><td>Camera capture</td><td>33ms</td><td>30 FPS webcam</td></tr>
+    <tr><td>Pose estimation</td><td>~30ms</td><td>MediaPipe heavy model</td></tr>
+    <tr><td>Retargeting</td><td>~12ms</td><td>Angle calculation and smoothing</td></tr>
+    <tr><td>Serial communication</td><td>~5ms</td><td>Sync write at 500kbps</td></tr>
+    <tr><td>Servo response</td><td>~50ms</td><td>Mechanical movement (STS3215 at 0.22s/60 deg)</td></tr>
+    <tr><td><strong>Total</strong></td><td><strong>~130ms</strong></td><td></td></tr>
+</table>
+
+<h3>Observations</h3>
+<ul>
+    <li>130ms latency is noticeable but still usable for teleoperation.</li>
+    <li>The smoothing and rate limiting make the motion look fluid rather than jittery.</li>
+    <li>Gimbal lock detection prevents erratic behavior at edge poses.</li>
+    <li>The servos stayed below 60C during 10+ minutes of continuous operation.</li>
+</ul>
+
+<h2>Hardware</h2>
+
+<table>
+    <tr><th>Component</th><th>Details</th></tr>
+    <tr><td>Robot platform</td><td>K-Scale Zeroth-01</td></tr>
+    <tr><td>Servos</td><td>16x Feetech STS3215 (19.5 kg-cm, 12-bit encoder)</td></tr>
+    <tr><td>Compute</td><td>Laptop for pose estimation, Milk-V Duo for servo control</td></tr>
+    <tr><td>Camera</td><td>1080p USB webcam at 30 FPS</td></tr>
+    <tr><td>Communication</td><td>Serial bus at 500kbps via Waveshare adapter</td></tr>
+</table>
+
+<h3>Cost</h3>
+<table>
+    <tr><th>Item</th><th>Cost</th></tr>
+    <tr><td>Servos (16x)</td><td>$400</td></tr>
+    <tr><td>Milk-V Duo</td><td>$9</td></tr>
+    <tr><td>Webcam</td><td>$30</td></tr>
+    <tr><td>3D printed parts</td><td>$50</td></tr>
+    <tr><td>Power supply</td><td>$25</td></tr>
+    <tr><td>Wiring and misc</td><td>$96</td></tr>
+    <tr><td><strong>Total</strong></td><td><strong>~$610</strong></td></tr>
+</table>
+
+<h2>Building It</h2>
+<p>Some photos from the build week:</p>
+
+<div class="gallery">
+    <figure>
+        <img src="static/images/progress/IMG_6645.jpg" alt="3D printed parts">
+        <figcaption>3D printing our parts</figcaption>
+    </figure>
+    <figure>
+        <img src="static/images/progress/IMG_6660.jpg" alt="Early wiring">
+        <figcaption>First servo wiring</figcaption>
+    </figure>
+    <figure>
+        <img src="static/images/progress/IMG_6661.jpg" alt="Testing in lab">
+        <figcaption>Testing pose estimation</figcaption>
+    </figure>
+    <figure>
+        <img src="static/images/progress/IMG_6674.jpg" alt="Debugging">
+        <figcaption>Testing teleoperation</figcaption>
+    </figure>
+</div>
+
+<h2>Team</h2>
+<figure class="team-photo">
+    <img src="static/images/team/group.jpg" alt="Team at Build18">
+    <figcaption>Left to right: Madhavan, Ganesh, Rohan, Revanth, Abhishek</figcaption>
+</figure>
+
+<h2>Acknowledgments</h2>
+<p>
+    This project was built at <a href="https://build18.org">CMU Build18 2025</a>. Thanks to <a href="https://kscale.dev">K-Scale Labs</a> for the open-source robot design files, and to the Build18 organizers for the workspace and support.
+</p>
+
+<footer>
+    <p><a href="https://github.com/RohanNaga/ShadowControl">GitHub</a></p>
+    <p>Built at CMU Build18 2025</p>
+</footer>
+
+</body>
+</html>
