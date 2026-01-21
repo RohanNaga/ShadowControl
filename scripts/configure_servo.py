@@ -181,22 +181,51 @@ def configure_servo(port, packet, new_id, factory_only=False):
 
 
 SERVO_NAMES = {
+    # Arms
     5: "R_Shoulder1",
     6: "R_Shoulder2",
     7: "R_Elbow",
     8: "L_Shoulder1",
     9: "L_Shoulder2",
     10: "L_Elbow",
+    # Right Leg
+    13: "R_Hip",
+    14: "R_Thigh",
+    15: "R_Knee",
+    16: "R_Shin",
+    17: "R_Ankle",
+    # Left Leg
+    18: "L_Hip",
+    19: "L_Thigh",
+    20: "L_Knee",
+    21: "L_Shin",
+    22: "L_Ankle",
 }
 
 NEUTRAL_POSITIONS = {
+    # Arms
     5: 2048,   # R_Shoulder1
     6: 2048,   # R_Shoulder2
     7: 2048,   # R_Elbow
     8: 2048,   # L_Shoulder1
     9: 2048,   # L_Shoulder2
     10: 2048,  # L_Elbow
+    # Right Leg
+    13: 2048,  # R_Hip
+    14: 2048,  # R_Thigh
+    15: 2048,  # R_Knee
+    16: 2048,  # R_Shin
+    17: 2048,  # R_Ankle
+    # Left Leg
+    18: 2048,  # L_Hip
+    19: 2048,  # L_Thigh
+    20: 2048,  # L_Knee
+    21: 2048,  # L_Shin
+    22: 2048,  # L_Ankle
 }
+
+ARM_SERVO_IDS = [5, 6, 7, 8, 9, 10]
+LEG_SERVO_IDS = [13, 14, 15, 16, 17, 18, 19, 20, 21, 22]
 
 
 def read_zero_positions(port, packet):
@@ -211,7 +240,8 @@ def read_zero_positions(port, packet):
     print("\nCurrent servo positions:")
     print("-" * 50)
 
-    for sid in [5, 6, 7, 8, 9, 10]:
+    servo_ids = ARM_SERVO_IDS + LEG_SERVO_IDS
+    for sid in servo_ids:
         _, result, _ = packet.ping(port, sid)
         if result != 0:
             print(f"  ID {sid} ({SERVO_NAMES[sid]}): OFFLINE")
@@ -314,6 +344,61 @@ def test_servo(port, packet, servo_id):
     return True
 
 
+def calibrate_encoder(port, packet, servo_ids):
+    """
+    Calibrate servo encoders to middle position (2048).
+
+    Writing 128 to register 40 (ADDR_TORQUE_ENABLE) sets the current
+    physical position as encoder value 2048, giving ±180° range.
+    """
+    print("=" * 50)
+    print("CALIBRATING SERVO ENCODERS TO MIDDLE (2048)")
+    print("=" * 50)
+    print("\nThis sets the current position as encoder value 2048.")
+    print("Position servos at desired 'zero' before running.\n")
+
+    port.setBaudRate(TARGET_BAUDRATE)
+
+    calibrated = []
+    failed = []
+
+    for sid in servo_ids:
+        name = SERVO_NAMES.get(sid, f"Servo_{sid}")
+
+        # Check if servo responds
+        _, result, _ = packet.ping(port, sid)
+        if result != 0:
+            print(f"  ID {sid} ({name}): OFFLINE - skipped")
+            failed.append(sid)
+            continue
+
+        # Write 128 to register 40 to set current position as 2048
+        result, error = packet.write1ByteTxRx(port, sid, ADDR_TORQUE_ENABLE, 128)
+        if result != 0:
+            print(f"  ID {sid} ({name}): FAILED (error {error})")
+            failed.append(sid)
+            continue
+
+        time.sleep(0.1)
+
+        # Verify position is now 2048
+        pos, result, _ = packet.read2ByteTxRx(port, sid, ADDR_CURRENT_POSITION)
+        if result == 0:
+            pos = ((pos & 0xFF) << 8) | ((pos >> 8) & 0xFF)
+            print(f"  ID {sid} ({name}): ✓ Calibrated (pos={pos})")
+            calibrated.append(sid)
+        else:
+            print(f"  ID {sid} ({name}): ✓ Written, verify failed")
+            calibrated.append(sid)
+
+    print("-" * 50)
+    print(f"\nCalibrated: {len(calibrated)} servo(s)")
+    if failed:
+        print(f"Failed/Offline: {failed}")
+
+    return calibrated
+
+
 def auto_detect_port():
     """Try to auto-detect the Waveshare USB port."""
     import glob
@@ -337,10 +422,11 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-    python configure_servo.py --scan              # Scan for all servos
-    python configure_servo.py --new-id 5          # Configure servo to ID 5
-    python configure_servo.py --test 5            # Test servo ID 5
-    python configure_servo.py --new-id 6 --test 6 # Configure and test
+    python configure_servo.py --scan                # Scan for all servos
+    python configure_servo.py --new-id 5            # Configure servo to ID 5
+    python configure_servo.py --test 5              # Test servo ID 5
+    python configure_servo.py --calibrate-arms      # Set arm encoder to middle (2048)
+    python configure_servo.py --calibrate-legs      # Set leg encoder to middle (2048)
 """
     )
 
@@ -352,6 +438,12 @@ Examples:
     parser.add_argument("--set-zero", action="store_true", help="Move all servos to neutral positions")
     parser.add_argument("--factory", "-f", action="store_true",
                         help="Only configure factory servos (1Mbps) - ignores already-configured servos")
+    parser.add_argument("--calibrate-arms", action="store_true",
+                        help="Calibrate arm servos (5-10) encoder to middle position (2048)")
+    parser.add_argument("--calibrate-legs", action="store_true",
+                        help="Calibrate leg servos (13-22) encoder to middle position (2048)")
+    parser.add_argument("--calibrate", type=int, nargs="+",
+                        help="Calibrate specific servo IDs to middle position (e.g., --calibrate 13 14 15)")
 
     args = parser.parse_args()
 
@@ -395,8 +487,19 @@ Examples:
         if args.test:
             test_servo(port, packet, args.test)
 
-        if not args.scan and not args.new_id and not args.test and not args.zero and not args.set_zero:
-            print("No action specified. Use --scan, --new-id, or --test")
+        if args.calibrate_arms:
+            calibrate_encoder(port, packet, ARM_SERVO_IDS)
+
+        if args.calibrate_legs:
+            calibrate_encoder(port, packet, LEG_SERVO_IDS)
+
+        if args.calibrate:
+            calibrate_encoder(port, packet, args.calibrate)
+
+        actions = [args.scan, args.new_id, args.test, args.zero, args.set_zero,
+                   args.calibrate_arms, args.calibrate_legs, args.calibrate]
+        if not any(actions):
+            print("No action specified. Use --scan, --new-id, --test, or --calibrate-*")
             print("Run with --help for usage.")
 
     finally:

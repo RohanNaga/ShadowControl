@@ -146,86 +146,40 @@ def angle_between(v1, v2):
 
 def elbow_flexion(shoulder, elbow, wrist):
     """
-    Calculate elbow flexion angle using plane projection for improved accuracy.
+    Calculate elbow flexion angle - simple and robust, NO gimbal lock.
     Returns 0° for straight arm, increases as elbow bends (0-180° range).
-    
-    Method: Projects vectors onto plane perpendicular to upper arm axis.
-    This removes the effect of shoulder roll/rotation, giving pure flexion angle.
-    Similar structure to shoulder_abduction and shoulder_extension for consistency.
-    
+
+    Method: Direct angle between upper arm and forearm vectors.
+    Elbow is a hinge joint - no need for complex plane projection.
+
     Coordinate System:
     - Upper arm vector: shoulder → elbow
     - Forearm vector: elbow → wrist
-    - Projects to plane perpendicular to upper arm axis (similar to shoulder_roll)
-    - Measures angle between upper arm direction and forearm in that plane
-    - This gives flexion angle independent of shoulder roll component
-    
-    GIMBAL LOCK: When forearm is nearly parallel to upper arm, the projection
-    becomes very small and the angle becomes unreliable. We handle edge cases.
+    - Straight arm: vectors point same direction → 0°
+    - 90° bend: vectors perpendicular → 90°
+    - Fully bent: vectors opposite → 180°
     """
     upper_arm = elbow - shoulder  # Vector from shoulder to elbow
     forearm = wrist - elbow       # Vector from elbow to wrist
-    
-    # Keep full vectors for comparison
-    upper_arm_full = upper_arm.copy()
-    forearm_full = forearm.copy()
-    
-    # Get full vector lengths for comparison
-    upper_arm_full_norm = np.linalg.norm(upper_arm_full)
-    forearm_full_norm = np.linalg.norm(forearm_full)
-    if upper_arm_full_norm < 1e-6 or forearm_full_norm < 1e-6:
+
+    # Get vector lengths
+    upper_arm_norm = np.linalg.norm(upper_arm)
+    forearm_norm = np.linalg.norm(forearm)
+
+    if upper_arm_norm < 1e-6 or forearm_norm < 1e-6:
         return float("nan")
-    
-    # Normalize vectors
-    upper_arm_unit = upper_arm / upper_arm_full_norm
-    forearm_unit = forearm / forearm_full_norm
-    
-    # Project forearm onto plane perpendicular to upper arm axis
-    # Remove component parallel to upper arm (this removes roll component)
-    forearm_perp = forearm_unit - np.dot(forearm_unit, upper_arm_unit) * upper_arm_unit
-    
-    # Check if projected forearm vector is valid
-    forearm_perp_norm = np.linalg.norm(forearm_perp)
-    
-    # GIMBAL LOCK FIX: If the perpendicular projection is less than 30% of the full forearm length,
-    # the forearm is mostly parallel to the upper arm and the angle is unreliable
-    projection_ratio = forearm_perp_norm / forearm_full_norm if forearm_full_norm > 1e-6 else 0.0
-    if projection_ratio < 0.3:
-        # Forearm is nearly parallel to upper arm - check if extended or bent
-        dot_parallel = np.dot(forearm_unit, upper_arm_unit)
-        if dot_parallel > 0.9:
-            return 0.0  # Fully extended (same direction)
-        elif dot_parallel < -0.9:
-            return 180.0  # Fully bent (opposite direction)
-        else:
-            return float("nan")  # Angle is unreliable in gimbal lock region
-    
-    # Reference direction: upper arm direction (reversed, from elbow back to shoulder)
-    # This is the direction we measure flexion relative to
-    upper_arm_reversed = -upper_arm_unit
-    
-    # Project the reversed upper arm onto the perpendicular plane
-    # (should already be in plane since it's opposite to upper_arm_unit)
-    upper_arm_rev_perp = upper_arm_reversed - np.dot(upper_arm_reversed, upper_arm_unit) * upper_arm_unit
-    upper_arm_rev_perp_norm = np.linalg.norm(upper_arm_rev_perp)
-    
-    if upper_arm_rev_perp_norm < 1e-6:
-        # Edge case: shouldn't happen normally
-        return float("nan")
-    
-    # Normalize perpendicular components
-    forearm_perp = forearm_perp / forearm_perp_norm
-    upper_arm_rev_perp = upper_arm_rev_perp / upper_arm_rev_perp_norm
-    
-    # Calculate angle from upper arm direction (reversed) to forearm direction
-    # This gives us the flexion angle: 0° when straight, 180° when fully bent
-    dot = np.clip(np.dot(upper_arm_rev_perp, forearm_perp), -1.0, 1.0)
+
+    # Normalize
+    upper_arm_unit = upper_arm / upper_arm_norm
+    forearm_unit = forearm / forearm_norm
+
+    # Direct angle between vectors
+    # dot = 1 when parallel (straight), 0 when perpendicular (90°), -1 when opposite (180°)
+    dot = np.clip(np.dot(upper_arm_unit, forearm_unit), -1.0, 1.0)
+
+    # acos gives angle: 0° when parallel, 90° when perpendicular, 180° when opposite
     angle = np.degrees(np.arccos(dot))
-    
-    # The angle gives us flexion:
-    # - 0° = vectors aligned (straight arm) -> 0° flexion
-    # - 90° = vectors perpendicular -> 90° flexion
-    # - 180° = vectors opposite (fully bent) -> 180° flexion
+
     return min(180.0, max(0.0, angle))
 
 
@@ -522,15 +476,15 @@ def draw_landmarks(frame, landmarks):
             start = landmarks[start_idx]
             end = landmarks[end_idx]
             if start.visibility > 0.5 and end.visibility > 0.5:
-            start_point = (int(start.x * w), int(start.y * h))
-            end_point = (int(end.x * w), int(end.y * h))
-            cv2.line(frame, start_point, end_point, (0, 255, 0), 2)
+                start_point = (int(start.x * w), int(start.y * h))
+                end_point = (int(end.x * w), int(end.y * h))
+                cv2.line(frame, start_point, end_point, (0, 255, 0), 2)
 
     # Draw landmarks
     for i, lm in enumerate(landmarks):
         if lm.visibility > 0.5:
-        x, y = int(lm.x * w), int(lm.y * h)
-        cv2.circle(frame, (x, y), 5, (0, 0, 255), -1)
+            x, y = int(lm.x * w), int(lm.y * h)
+            cv2.circle(frame, (x, y), 5, (0, 0, 255), -1)
 
 
 # ============================================================================
@@ -1124,13 +1078,22 @@ def main():
                 if args.debug and frame_timestamp_ms % 1000 < 34:
                     cmd_str = " ".join([f"ID{sid}={ang:+6.1f}" for sid, ang in servo_angles.items()])
                     logger.debug(f"SERVO CMD: {cmd_str}")
-                    # Specifically log elbow angles for debugging
-                    logger.debug(f"ELBOW DEBUG: L_elbow_raw={raw_pose_angles.get('left_elbow', 0):+6.1f}° "
-                               f"L_elbow_cal={pose_angles.get('left_elbow', 0):+6.1f}° "
-                               f"L_servo={servo_angles.get(10, 0):+6.1f}° | "
-                               f"R_elbow_raw={raw_pose_angles.get('right_elbow', 0):+6.1f}° "
-                               f"R_elbow_cal={pose_angles.get('right_elbow', 0):+6.1f}° "
-                               f"R_servo={servo_angles.get(7, 0):+6.1f}°")
+
+                # ELBOW DEBUG: Log frequently when debug enabled
+                if args.debug:
+                    l_elb_raw = raw_pose_angles.get('left_elbow', float('nan'))
+                    r_elb_raw = raw_pose_angles.get('right_elbow', float('nan'))
+                    l_elb_cal = pose_angles.get('left_elbow', float('nan'))
+                    r_elb_cal = pose_angles.get('right_elbow', float('nan'))
+                    l_elb_servo = servo_angles.get(10, float('nan'))
+                    r_elb_servo = servo_angles.get(7, float('nan'))
+                    l_offset = pose_zero_offsets.get('left_elbow', 0) if pose_zero_offsets else 0
+                    r_offset = pose_zero_offsets.get('right_elbow', 0) if pose_zero_offsets else 0
+
+                    # Log every 200ms to reduce spam but still catch issues
+                    if frame_timestamp_ms % 200 < 34:
+                        logger.debug(f"ELBOW: L_raw={l_elb_raw:+6.1f} L_off={l_offset:+6.1f} L_cal={l_elb_cal:+6.1f} L_srv={l_elb_servo:+6.1f} | "
+                                   f"R_raw={r_elb_raw:+6.1f} R_off={r_offset:+6.1f} R_cal={r_elb_cal:+6.1f} R_srv={r_elb_servo:+6.1f}")
 
                 # Send to servos
                 if servo_ctrl and servo_enabled and servo_angles:
@@ -1157,6 +1120,16 @@ def main():
                     if args.debug:
                         enc_str = " ".join([f"ID{sid}={ang:+6.1f}" for sid, ang in encoder_angles.items() if ang is not None])
                         logger.debug(f"ENCODER: {enc_str}")
+
+                        # Elbow-specific: compare commanded vs actual
+                        for elbow_id in [7, 10]:
+                            cmd = servo_angles.get(elbow_id, 0)
+                            enc = encoder_angles.get(elbow_id)
+                            raw = raw_positions.get(elbow_id)
+                            last = servo_ctrl.last_angles.get(elbow_id, 0)
+                            if enc is not None:
+                                diff = cmd - enc
+                                logger.debug(f"ELBOW ID{elbow_id}: cmd={cmd:+6.1f}° last={last:+6.1f}° enc={enc:+6.1f}° raw={raw} diff={diff:+.1f}°")
 
                 # Read temperatures less frequently (every ~3 seconds)
                 if servo_ctrl and servo_ctrl.connected and frame_timestamp_ms % 3000 < 34:

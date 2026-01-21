@@ -181,7 +181,7 @@ def main():
             servo_ids = [int(k) for k in cal.keys()]
         else:
             # Default: all arm servos
-            servo_ids = [5, 6, 7, 8, 9, 10]
+            servo_ids = [5, 6, 7, 8, 9, 10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25]
 
         if not servo_ids:
             print("No servos specified. Use --id or --all")

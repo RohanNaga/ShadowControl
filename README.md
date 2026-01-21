@@ -1,10 +1,10 @@
 # Shadow Control
 
-Vision-based bimanual teleoperation system for a humanoid boxing robot.
+**[Project Website](https://rohannaga.github.io/ShadowControl/)** | **[Demo Video](https://rohannaga.github.io/ShadowControl/#video)**
 
-**Competition**: CMU Build18 Hackathon (1-week timeline)
-**Team**: Shadow Control
-**Inspiration**: Real Steel movie - teleoperation through human movement tracking
+Vision-based teleoperation system for a humanoid robot. Control a robot by moving your body in front of a camera, inspired by the puppeteer concept from Real Steel.
+
+**Built at CMU Build18 2025** in one week from scratch.
 
 ---
 
@@ -14,21 +14,21 @@ Shadow Control enables real-time control of a K-Scale Zeroth-01 humanoid robot b
 
 ### Key Features
 
-- **Live Tracking Mode**: Real-time pose detection and robot control
-- **Video Playback Mode**: Execute pre-recorded movement sequences
-- **Single-Board Architecture**: Everything runs on Milk-V Duo S (no external laptop)
+- **Real-Time Teleoperation**: Control the robot by moving your body in front of a camera
 - **Low Latency**: ~130ms end-to-end (camera to robot motion)
+- **Built From Scratch**: 3D printed all parts and assembled everything ourselves in one week
+- **Robust Motion Control**: Gimbal lock detection, smoothing, and rate limiting for stable movement
 
 ### Tech Stack
 
 | Component | Technology |
 |-----------|------------|
-| Controller | Milk-V Duo S (512MB RAM, 0.5 TOPS TPU) |
-| Robot | K-Scale Zeroth-01 (16 servos) |
-| Pose Detection | MediaPipe BlazePose (33 landmarks) |
-| Servo Control | kos_zbot (K-Scale's robot OS) |
-| Camera | CAM-GC2083 (2MP, MIPI CSI) |
-| Servos | Feetech STS3215 (19kg.cm, 12-bit encoder) |
+| Pose Detection | MediaPipe BlazePose (33 landmarks) on laptop |
+| Servo Control | Custom Python driver with Feetech SDK |
+| Robot | K-Scale Zeroth-01 design (3D printed ourselves) |
+| Servos | 16x Feetech STS3215 (19.5 kg-cm, 12-bit encoder) |
+| Camera | 1080p USB webcam at 30 FPS |
+| Communication | Serial at 500kbps via Waveshare adapter |
 
 ---
 
@@ -54,8 +54,7 @@ ShadowControl/
 │   ├── test_servos.py     # Servo connectivity test
 │   └── test_vision.py     # Camera/pose detection test
 │
-├── models/                # Converted cvimodel files
-│   └── (yolov8n_pose.cvimodel)
+├── models/                # Model files (downloaded at runtime)
 │
 ├── docs/                  # Additional documentation
 └── tests/                 # Unit tests
@@ -80,10 +79,10 @@ ShadowControl/
 
 | Item | Qty | Purpose |
 |------|-----|---------|
-| K-Scale Zeroth-01 | 1 | 3D printed humanoid platform |
+| Robot frame | 1 | 3D printed ourselves (K-Scale Zeroth-01 design) |
 | STS3215 Servos | 24 | 7.4V, 19kg.cm, 12-bit encoder (16 used, 8 extras) |
-| Milk-V Duo S (512MB) | 1 | Main controller with TPU |
-| CAM-GC2083 | 1 | 2MP MIPI CSI camera |
+| Laptop | 1 | Pose estimation and servo control |
+| USB Webcam | 1 | 1080p at 30fps |
 | Waveshare Bus Servo Adapter | 4 | UART to servo interface (1 used, 3 extras) |
 | RC LiPo 12V 5200mAh | 1 | Main power |
 | 12V to 5V Converter | 3 | Logic power |
@@ -94,33 +93,35 @@ ShadowControl/
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                      MILK-V DUO S (512MB)                       │
+│                         LAPTOP                                   │
 │                                                                 │
 │  ┌───────────────┐     ┌─────────────────────────────────────┐ │
-│  │ GC2083 Camera │────▶│         TDL SDK + TPU              │ │
-│  │ (2MP MIPI)    │     │  ┌─────────────────────────────┐   │ │
-│  │               │     │  │  MediaPipe BlazePose        │   │ │
-│  └───────────────┘     │  │  (17 keypoints @ 640x640)   │   │ │
-│                        │  └──────────────┬──────────────┘   │ │
-│                        │                 │                   │ │
-│                        │                 ▼                   │ │
-│                        │  ┌─────────────────────────────┐   │ │
-│                        │  │  Joint Angle Calculator     │   │ │
-│                        │  │  (keypoints → servo angles) │   │ │
-│                        │  └──────────────┬──────────────┘   │ │
-│                        └─────────────────┼───────────────────┘ │
-│                                          │                     │
-│  ┌───────────────┐                       ▼                     │
-│  │ kos_zbot      │    ┌─────────────────────────────────────┐ │
-│  │ (K-Scale OS)  │───▶│      Servo Control Loop             │ │
-│  └───────────────┘    │  UART @ 500kbps                     │ │
-│                       └──────────────┬──────────────────────┘ │
+│  │ USB Webcam    │────▶│      MediaPipe BlazePose            │ │
+│  │ (1080p 30fps) │     │      (33 landmarks)                 │ │
+│  └───────────────┘     └──────────────┬──────────────────────┘ │
+│                                       │                         │
+│                                       ▼                         │
+│                        ┌─────────────────────────────────────┐ │
+│                        │  Joint Angle Retargeting            │ │
+│                        │  - Plane projection for angles      │ │
+│                        │  - Gimbal lock detection            │ │
+│                        │  - EMA smoothing (alpha=0.4)        │ │
+│                        │  - Rate limiting (30 deg/frame)     │ │
+│                        └──────────────┬──────────────────────┘ │
+│                                       │                         │
+│                                       ▼                         │
+│                        ┌─────────────────────────────────────┐ │
+│                        │  Servo Control (Feetech SDK)        │ │
+│                        │  Serial @ 500kbps, sync write       │ │
+│                        └──────────────┬──────────────────────┘ │
 └──────────────────────────────────────┼─────────────────────────┘
-                                       │
-                    ┌──────────────────┴──────────────────┐
-                    │     WAVESHARE BUS SERVO ADAPTER     │
-                    │              16x STS3215            │
-                    └─────────────────────────────────────┘
+                                       │ USB-to-Serial
+                                       ▼
+                    ┌──────────────────────────────────────┐
+                    │     WAVESHARE BUS SERVO ADAPTER      │
+                    │              16x STS3215             │
+                    │         (6 active for arms)          │
+                    └──────────────────────────────────────┘
 ```
 
 ### Milk-V Duo S Specifications
@@ -297,13 +298,13 @@ STEP 1: CAMERA INPUT
 └────────┬────────┘
          │ RGB frames (~33ms)
          ▼
-STEP 2: POSE DETECTION (TPU)
+STEP 2: POSE DETECTION (Laptop)
 ┌─────────────────────────────────┐
-│ MediaPipe BlazePose             │  → Runs on laptop
-│ 33 landmarks, heavy model       │  → ~30ms inference
+│ MediaPipe BlazePose             │  → Heavy model for stability
+│ 33 landmarks with 3D positions  │  → ~30ms inference
 └────────┬────────────────────────┘
          │ 33 landmarks (x, y, z, visibility)
-         │ [full body pose including hands and face]
+         │ [shoulders, elbows, wrists, hips, etc.]
          ▼
 STEP 3: JOINT ANGLE CALCULATION (CPU)
 ┌─────────────────────────────────┐
@@ -389,7 +390,7 @@ Key points:
 
 ```bash
 # Clone repository
-git clone https://github.com/your-team/ShadowControl.git
+git clone https://github.com/RohanNaga/ShadowControl.git
 cd ShadowControl
 
 # Install dependencies
@@ -399,35 +400,7 @@ pip install -r requirements.txt
 pip install kos_zbot
 ```
 
-### 4. YOLOv8-Pose Model Conversion
-
-The Milk-V TPU requires a converted cvimodel:
-
-```bash
-# Step 1: Export YOLOv8n-pose to ONNX (on dev machine)
-pip install ultralytics
-yolo export model=yolov8n-pose.pt format=onnx
-
-# Step 2: Set up TPU-MLIR (Docker recommended)
-docker pull sophgo/tpuc_dev:latest
-
-# Step 3: Convert ONNX to MLIR
-model_transform.py --model_name yolov8n_pose \
-  --model_def yolov8n-pose.onnx \
-  --input_shapes [[1,3,640,640]] \
-  --pixel_format rgb --output_names output0 \
-  --mlir yolov8n_pose.mlir
-
-# Step 4: Deploy cvimodel with INT8 quantization
-model_deploy.py --mlir yolov8n_pose.mlir \
-  --quantize INT8 --chip cv181x \
-  --model yolov8n_pose.cvimodel
-
-# Step 5: Copy to Milk-V
-scp yolov8n_pose.cvimodel root@milkv:/path/to/ShadowControl/models/
-```
-
-### 5. Initial Testing (Stock Linux Image)
+### 4. Initial Testing
 
 If you have stock Milk-V Linux (before flashing K-Scale image), you can still test hardware:
 
@@ -620,26 +593,21 @@ def shoulder_angle(shoulder, elbow):
 
 ## Dependencies
 
-### Python (requirements.txt)
+### Python
 ```
-kos_zbot>=0.1.0      # K-Scale robot OS
+mediapipe>=0.10.0     # Pose detection
 numpy>=1.21.0         # Math operations
-pyyaml>=6.0           # Config parsing
-opencv-python>=4.5.0  # Dev only - image processing
-ultralytics>=8.0.0    # Dev only - model export
+opencv-python>=4.5.0  # Camera capture and image processing
+pyserial>=3.5         # Serial communication with servos
 ```
-
-### System (Milk-V)
-- TDL SDK - Pose detection on TPU
-- V4L2 - Camera interface
 
 ---
 
-## Known Issues
+## Challenges Overcome
 
-1. **K-Scale UART docs missing** - K-Scale doesn't document the Milk-V baudrate limitation (921600 max); we discovered it through Sophgo docs
-2. **No pre-built YOLOv8-pose cvimodel** - Must convert using TPU-MLIR
-3. **STS3215 leg speed** - K-Scale recommends STS3250 for legs due to speed requirements, but STS3215 works for upper-body boxing focus
+1. **Servo baudrate mismatch** - Feetech servos default to 1Mbps but many controllers max out lower. We reconfigured all servos to 500kbps.
+2. **Gimbal lock in angle calculations** - When limbs align with projection axes, angles become unstable. We detect this and hold previous values.
+3. **Sensor noise causing jitter** - Raw pose data is noisy. We implemented EMA smoothing, rate limiting, and dead zones for stable motion.
 
 ---
 
@@ -672,45 +640,39 @@ python scripts/configure_baudrate.py --scan
 
 ### High Latency
 
-1. Check TPU inference time (should be ~45ms)
-2. Reduce input resolution if needed
-3. Verify servo communication not blocking
+1. Check pose estimation time (should be ~30ms with MediaPipe heavy model)
+2. Verify servo communication not blocking
+3. Check for USB latency issues
 
 ---
 
-## Next Steps / Implementation Roadmap
+## What We Built
 
-### Phase 2: Pose Detection Pipeline
-- [ ] Set up TPU-MLIR environment (Docker)
-- [ ] Export YOLOv8n-pose to ONNX format
-- [ ] Convert ONNX → MLIR → cvimodel
-- [ ] Deploy cvimodel to Milk-V
-- [ ] Integrate with TDL SDK
-- [ ] Test 17 keypoint output
+### Pose Detection
+- [x] MediaPipe BlazePose integration with 33 landmarks
+- [x] High confidence thresholds (0.9) for reliable detection
+- [x] Heavy model for stable 3D positions
 
-### Phase 3: Joint Angle Calculation
-- [ ] Implement keypoint → angle conversion in C
-- [ ] Map human proportions to robot proportions
-- [ ] Add smoothing/filtering for stable output
+### Joint Angle Retargeting
+- [x] Plane projection method for computing joint angles
+- [x] Gimbal lock detection (30% threshold) to prevent jittery commands
+- [x] Proper handling of edge cases with NaN returns
 
-### Phase 4: Servo Control Integration
-- [ ] Reconfigure all servos to 500kbps
-- [ ] Install kos_zbot on Milk-V
-- [ ] Test servo communication
-- [ ] Implement sync write for coordinated motion
-- [ ] Add safety limits
+### Motion Control
+- [x] Exponential moving average smoothing (alpha=0.4)
+- [x] Rate limiting at 30 degrees per frame
+- [x] Dead zone of 2 degrees to eliminate servo hunting
+- [x] Baseline position reading on startup
 
-### Phase 5: Full Integration
-- [ ] End-to-end pipeline: Camera → TPU → Angles → Servos
-- [ ] Latency measurement (<100ms target)
-- [ ] Calibration procedure
-- [ ] Mode switching (live vs playback)
+### Servo Control
+- [x] Reconfigured all servos to 500kbps (discovered Milk-V baudrate limitation)
+- [x] Sync write for coordinated motion
+- [x] Temperature monitoring during operation
 
-### Phase 6: Polish
-- [ ] E-Stop integration (GPIO)
-- [ ] Video playback mode
-- [ ] Demo preparation
-- [ ] Safety testing
+### Full Integration
+- [x] End-to-end pipeline: Camera → Pose → Angles → Servos
+- [x] ~130ms latency achieved
+- [x] Successful demo at Build18 expo
 
 ---
 
@@ -724,12 +686,11 @@ python scripts/configure_baudrate.py --scan
 ### Milk-V / Sophgo
 - [Duo S Getting Started](https://milkv.io/docs/duo/getting-started/duos)
 - [TDL SDK Guide](https://doc.sophgo.com/cvitek-develop-docs/master/docs_latest_release/CV180x_CV181x/en/01.software/TPU/TDL_SDK_Software_Development_Guide/build/html/index.html)
-- [YOLO Development Guide](https://doc.sophgo.com/cvitek-develop-docs/master/docs_latest_release/CV180x_CV181x/en/01.software/TPU/YOLO_Development_Guide/build/html/6_Yolov8_development.html)
 - [Peripheral Driver Guide (UART)](https://doc.sophgo.com/cvitek-develop-docs/master/docs_latest_release/CV180x_CV181x/en/01.software/BSP/Peripheral_Driver_Operation_Guide/build/html/8_UART_Operation_Guide.html)
 - [duo-tdl-examples GitHub](https://github.com/milkv-duo/duo-tdl-examples)
 
 ### Pose Estimation
-- [YOLOv8-Pose](https://docs.ultralytics.com/tasks/pose/)
+- [MediaPipe Pose](https://ai.google.dev/edge/mediapipe/solutions/vision/pose_landmarker)
 - [H2O Human to Humanoid](https://human2humanoid.com/)
 
 ### Related Projects
@@ -747,4 +708,10 @@ MIT License - See LICENSE file
 
 ## Team
 
-**Shadow Control** - CMU Build18 Hackathon 2025
+Built by five CMU students at Build18 2025:
+
+- [Rohan Nagabhirava](https://www.linkedin.com/in/rohan-nagabhirava/)
+- [Abhishek Hemlani](https://www.linkedin.com/in/abhishek-hemlani/)
+- [Ganesh Selvakumar](https://www.linkedin.com/in/ganesh-selvakumar-3a6036266/)
+- [Madhavan Iyengar](https://www.linkedin.com/in/madhavan-iyengar/)
+- [Revanth Senthilkumaran](https://www.linkedin.com/in/revanth-senthilkumaran/)
